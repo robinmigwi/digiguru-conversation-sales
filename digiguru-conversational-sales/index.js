@@ -1,7 +1,7 @@
 // DigiGuru WhatsApp bot. Node 18+, Express, WhatsApp Cloud API, Anthropic API.
 const express = require("express");
 const crypto = require("crypto");
-const KNOWLEDGE = require("./knowledge/digiguru");
+const KNOWLEDGE = require("./digiguru");
 
 const {
   ANTHROPIC_API_KEY, ANTHROPIC_MODEL = "claude-haiku-4-5-20251001",
