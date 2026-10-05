@@ -131,7 +131,7 @@ const seen = new Set();     // processed message ids (dedupe webhook retries)
 const MAX_TURNS = 20;
 
 app.get("/health", (_req, res) => res.send("ok")); // point a free uptime pinger here
-\napp.get("/google/auth", (_req, res) => {
+app.get("/google/auth", (_req, res) => {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
     return res.status(503).send("Google OAuth is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Render first.");
   }
