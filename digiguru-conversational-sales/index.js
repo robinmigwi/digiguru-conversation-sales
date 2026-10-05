@@ -2,13 +2,21 @@
 const express = require("express");
 const crypto = require("crypto");
 const KNOWLEDGE = require("./digiguru");
+const { google } = require("googleapis");
 
 const {
   ANTHROPIC_API_KEY, ANTHROPIC_MODEL = "claude-haiku-4-5-20251001",
   WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, VERIFY_TOKEN, APP_SECRET, OWNER_WHATSAPP,
   LLM_PROVIDER = "groq", GROQ_API_KEY, GROQ_MODEL = "openai/gpt-oss-20b",
   PORT = 3000,
+  GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN,
+  GOOGLE_CALENDAR_ID = "primary",
+  BOOKING_TIME_ZONE = "Africa/Nairobi",
+  BOOKING_DURATION_MINUTES = "20",
+  MEETING_NAME = "DigiGuru Growth Conversation",
 } = process.env;
+
+const BOOKING_DURATION = Number(BOOKING_DURATION_MINUTES);
 
 const SYSTEM = `You are Sakura, DigiGuru's WhatsApp sales concierge.
 
@@ -83,15 +91,26 @@ Do not force a meeting.
 BOOKING
 Only move to booking when the visitor shows clear intent, asks for Robin, asks how DigiGuru could help, asks for a proposal or demo, or agrees the problem is worth fixing.
 Collect missing booking details one at a time. Never ask for information already given.
-You cannot see Robin’s calendar. Never promise a confirmed time. Say Robin will confirm shortly.
+
+The booking is for a 20 minute “DigiGuru Growth Conversation”.
+Booking hours are Monday to Friday, 9:00 AM to 5:00 PM Africa/Nairobi.
+The calendar is the final authority on availability.
+Before asking for a time, you may ask for the prospect’s email so the calendar invitation can be sent.
+
+When the visitor has chosen a day and time and you already know their name, business and email, convert the chosen time into an exact ISO 8601 datetime with the Africa/Nairobi offset (+03:00).
+Then output this action marker at the very end of your reply:
+[[BOOKING: name | business | email | YYYY-MM-DDTHH:mm:00+03:00 | one line summary of their leak]]
+Do not output a BOOKING marker until the visitor has actually agreed to that time.
+Never tell the visitor that the time is confirmed before the booking action succeeds.
+After a successful booking, the application will send the actual confirmation.
 
 HUMAN HANDOFF
 If the visitor asks for Robin or a human, do not make them repeat themselves. Carry their useful context forward.
 If the visitor is upset, uncertain, or asks for something outside your knowledge, hand off cleanly.
 
 ACTION MARKERS
-- When you have name, business and preferred time: [[NOTIFY: BOOKING | name | business | preferred time | one line summary of their leak]]
-- When handing off: [[NOTIFY: HANDOFF | name if known | reason | one line summary]]
+- Booking: [[BOOKING: name | business | email | YYYY-MM-DDTHH:mm:00+03:00 | one line summary]]
+- Human handoff: [[NOTIFY: HANDOFF | name if known | reason | one line summary]]
 Action markers must be at the very end of the final bubble and are invisible to the visitor.
 
 RULES
@@ -99,6 +118,7 @@ RULES
 - Never create fake urgency or pressure.
 - Never pretend to be a human.
 - Stay focused on DigiGuru and the visitor’s business.
+- Never say “I cannot see Robin’s calendar.” The application checks the calendar when a booking is ready.
 - ${KNOWLEDGE}`
 
 const app = express();
@@ -142,7 +162,6 @@ async function handle(m) {
     return send(from, "I can handle text here for now. Send me what you need help with and I’ll take it from there.");
   }
 
-  // A short one-time entry message makes the first impression clear without starting with a sales pitch.
   if (!welcomed.has(from)) {
     welcomed.add(from);
     await send(from, "Hey, I’m Sakura from DigiGuru 👋 We help businesses turn more of the enquiries they already get into bookings and sales, especially across social media, websites and WhatsApp. I’ll keep it simple.");
@@ -153,14 +172,272 @@ async function handle(m) {
   turns.push({ role: "user", content: m.text.body });
 
   const reply = await askClaude(turns);
-  turns.push({ role: "assistant", content: reply });
+  const bookingMatch = reply.match(/\[\[BOOKING:([\s\S]*?)\]\]/);
+  const notifyMatch = reply.match(/\[\[NOTIFY:([\s\S]*?)\]\]/);
+  const clean = reply.replace(/\[\[(?:BOOKING|NOTIFY):[\s\S]*?\]\]/g, "").trim();
+
+  if (bookingMatch) {
+    const booking = parseBookingMarker(bookingMatch[1]);
+
+    if (!booking) {
+      turns.push({ role: "assistant", content: "I need one more detail before I can book that." });
+      history.set(from, turns.slice(-MAX_TURNS));
+      return send(from, "I need one more detail before I can book that. What email should I send the invite to?");
+    }
+
+    const result = await createOrSuggestBooking(booking);
+
+    if (result.status === "booked") {
+      const dateText = formatBookingDate(result.start);
+      const first = `You’re booked for ${dateText}.`;
+      const second = result.meetLink
+        ? `I’ve sent the Google Meet invite to ${booking.email}. Here’s the link: ${result.meetLink}`
+        : `I’ve sent the Google Calendar invite to ${booking.email}. Google is adding the Meet link to the invite now.`;
+
+      const confirmation = `${first}\n\n${second}\n\nSee you then 👋`;
+      turns.push({ role: "assistant", content: confirmation });
+      history.set(from, turns.slice(-MAX_TURNS));
+      await sendReplyBubbles(from, confirmation);
+      await notifyOwner(from, `BOOKING | ${booking.name} | ${booking.business} | ${dateText} | ${booking.email} | ${result.meetLink || result.eventLink}`);
+      return;
+    }
+
+    if (result.status === "unavailable") {
+      const alternatives = result.alternatives.map(formatBookingDate);
+      let response;
+      if (alternatives.length >= 2) {
+        response = `That time’s already taken.\n\nI can do ${alternatives[0]} or ${alternatives[1]}. Which works better?`;
+      } else if (alternatives.length === 1) {
+        response = `That time’s already taken.\n\nI can do ${alternatives[0]}. Would that work?`;
+      } else {
+        response = "That time’s already taken. Give me another day or time and I’ll check it.";
+      }
+      turns.push({ role: "assistant", content: response });
+      history.set(from, turns.slice(-MAX_TURNS));
+      return sendReplyBubbles(from, response);
+    }
+
+    const fallback = "I’ve got your details, but the booking system hit a small issue on my side. I don’t want to give you a false confirmation. Robin will follow up and confirm the appointment.";
+    turns.push({ role: "assistant", content: fallback });
+    history.set(from, turns.slice(-MAX_TURNS));
+    await send(from, fallback);
+    await notifyOwner(from, `BOOKING_ERROR | ${booking.name} | ${booking.business} | ${booking.email} | ${result.error || "unknown error"}`);
+    return;
+  }
+
+  const assistantContent = clean || reply;
+  turns.push({ role: "assistant", content: assistantContent });
   history.set(from, turns.slice(-MAX_TURNS));
 
-  const match = reply.match(/\[\[NOTIFY:([\s\S]*?)\]\]/);
-  const clean = reply.replace(/\[\[NOTIFY:[\s\S]*?\]\]/g, "").trim();
-
   await sendReplyBubbles(from, clean);
-  if (match) await notifyOwner(from, match[1].trim());
+  if (notifyMatch) await notifyOwner(from, notifyMatch[1].trim());
+}
+
+function getGoogleCalendarClient() {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REFRESH_TOKEN) {
+    throw new Error("Google Calendar credentials are not configured");
+  }
+
+  const auth = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
+  auth.setCredentials({ refresh_token: GOOGLE_REFRESH_TOKEN });
+
+  return google.calendar({ version: "v3", auth });
+}
+
+function parseBookingMarker(value) {
+  const parts = value.split("|").map((part) => part.trim());
+  if (parts.length < 5) return null;
+
+  const [name, business, email, startIso, ...summaryParts] = parts;
+  const summary = summaryParts.join(" | ").trim();
+
+  if (!name || !business || !/^\S+@\S+\.\S+$/.test(email)) return null;
+
+  const start = new Date(startIso);
+  if (Number.isNaN(start.getTime())) return null;
+  if (!summary) return null;
+
+  return { name, business, email, startIso, start, summary };
+}
+
+function getNairobiParts(date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: BOOKING_TIME_ZONE,
+    weekday: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  return Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+}
+
+function isWithinBookingHours(start) {
+  const startParts = getNairobiParts(start);
+  const end = new Date(start.getTime() + BOOKING_DURATION * 60000);
+  const endParts = getNairobiParts(end);
+  const weekdays = new Set(["Mon", "Tue", "Wed", "Thu", "Fri"]);
+
+  if (!weekdays.has(startParts.weekday)) return false;
+  if (!weekdays.has(endParts.weekday)) return false;
+
+  const startMinutes = Number(startParts.hour) * 60 + Number(startParts.minute);
+  const endMinutes = Number(endParts.hour) * 60 + Number(endParts.minute);
+
+  return startMinutes >= 9 * 60 && endMinutes <= 17 * 60;
+}
+
+function formatBookingDate(date) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: BOOKING_TIME_ZONE,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
+}
+
+function toDateKey(date) {
+  const p = getNairobiParts(date);
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function addDaysToDateKey(dateKey, days) {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d + days));
+  return utc.toISOString().slice(0, 10);
+}
+
+function createNairobiDate(dateKey, hour, minute) {
+  return new Date(`${dateKey}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00+03:00`);
+}
+
+async function getBusyTimes(calendar, timeMin, timeMax) {
+  const response = await calendar.freebusy.query({
+    requestBody: {
+      timeMin: timeMin.toISOString(),
+      timeMax: timeMax.toISOString(),
+      items: [{ id: GOOGLE_CALENDAR_ID }],
+    },
+  });
+
+  return response.data.calendars?.[GOOGLE_CALENDAR_ID]?.busy || [];
+}
+
+function overlapsBusy(start, end, busy) {
+  return busy.some((block) => {
+    const busyStart = new Date(block.start).getTime();
+    const busyEnd = new Date(block.end).getTime();
+    return start.getTime() < busyEnd && end.getTime() > busyStart;
+  });
+}
+
+async function createOrSuggestBooking(booking) {
+  try {
+    if (BOOKING_DURATION !== 20) {
+      throw new Error("BOOKING_DURATION_MINUTES must remain 20 for this booking flow");
+    }
+
+    const start = booking.start;
+    const end = new Date(start.getTime() + BOOKING_DURATION * 60000);
+
+    if (!isWithinBookingHours(start)) {
+      return { status: "unavailable", alternatives: [] };
+    }
+
+    if (start.getTime() <= Date.now()) {
+      return { status: "unavailable", alternatives: [] };
+    }
+
+    const calendar = getGoogleCalendarClient();
+    const horizonEnd = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const busy = await getBusyTimes(calendar, start, horizonEnd);
+
+    if (overlapsBusy(start, end, busy)) {
+      const alternatives = [];
+      const requestedKey = toDateKey(start);
+
+      for (let dayOffset = 0; dayOffset < 7 && alternatives.length < 2; dayOffset++) {
+        const key = addDaysToDateKey(requestedKey, dayOffset);
+        const dayStartHour = dayOffset === 0 ? Number(getNairobiParts(start).hour) : 9;
+        const dayStartMinute = dayOffset === 0 ? Number(getNairobiParts(start).minute) + BOOKING_DURATION : 0;
+
+        let totalMinutes = dayStartHour * 60 + dayStartMinute;
+        totalMinutes = Math.ceil(totalMinutes / BOOKING_DURATION) * BOOKING_DURATION;
+
+        for (; totalMinutes + BOOKING_DURATION <= 17 * 60 && alternatives.length < 2; totalMinutes += BOOKING_DURATION) {
+          const candidate = createNairobiDate(key, Math.floor(totalMinutes / 60), totalMinutes % 60);
+          const candidateEnd = new Date(candidate.getTime() + BOOKING_DURATION * 60000);
+
+          if (!isWithinBookingHours(candidate)) continue;
+          if (candidate.getTime() <= Date.now()) continue;
+          if (!overlapsBusy(candidate, candidateEnd, busy) && !alternatives.some((a) => a.getTime() === candidate.getTime())) {
+            alternatives.push(candidate);
+          }
+        }
+      }
+
+      return { status: "unavailable", alternatives };
+    }
+
+    const requestId = `digiguru-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const eventResponse = await calendar.events.insert({
+      calendarId: GOOGLE_CALENDAR_ID,
+      sendUpdates: "all",
+      conferenceDataVersion: 1,
+      requestBody: {
+        summary: MEETING_NAME,
+        description:
+          `Business: ${booking.business}\n\nBooked through Sakura on WhatsApp.\n\nConversation summary:\n${booking.summary}`,
+        start: {
+          dateTime: start.toISOString(),
+          timeZone: BOOKING_TIME_ZONE,
+        },
+        end: {
+          dateTime: end.toISOString(),
+          timeZone: BOOKING_TIME_ZONE,
+        },
+        attendees: [{ email: booking.email, displayName: booking.name }],
+        conferenceData: {
+          createRequest: {
+            requestId,
+            conferenceSolutionKey: { type: "hangoutsMeet" },
+          },
+        },
+      },
+    });
+
+    let event = eventResponse.data;
+
+    for (let i = 0; i < 8 && !event.hangoutLink; i++) {
+      if (i > 0) await new Promise((resolve) => setTimeout(resolve, 500));
+      const refreshed = await calendar.events.get({
+        calendarId: GOOGLE_CALENDAR_ID,
+        eventId: event.id,
+      });
+      event = refreshed.data;
+    }
+
+    const meetLink =
+      event.hangoutLink ||
+      event.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video")?.uri ||
+      null;
+
+    return {
+      status: "booked",
+      start,
+      eventLink: event.htmlLink,
+      meetLink,
+    };
+  } catch (error) {
+    console.error("booking error", error.message);
+    return { status: "error", error: error.message };
+  }
 }
 
 async function sendReplyBubbles(to, body) {
@@ -179,20 +456,24 @@ async function sendReplyBubbles(to, body) {
 async function askClaude(messages) {
   try {
     if (LLM_PROVIDER === "anthropic") {
+      const nowContext = new Intl.DateTimeFormat("en-GB", { timeZone: BOOKING_TIME_ZONE, dateStyle: "full", timeStyle: "short" }).format(new Date());
+      const runtimeSystem = SYSTEM + `\n\nCURRENT DATE AND TIME IN ${BOOKING_TIME_ZONE}: ${nowContext}`;
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: ANTHROPIC_MODEL, max_tokens: 400, system: SYSTEM, messages }),
+        body: JSON.stringify({ model: ANTHROPIC_MODEL, max_tokens: 400, system: runtimeSystem, messages }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(JSON.stringify(d));
       return d.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
     }
     // Default: Groq (free tier, OpenAI style API, runs Llama)
+    const nowContext = new Intl.DateTimeFormat("en-GB", { timeZone: BOOKING_TIME_ZONE, dateStyle: "full", timeStyle: "short" }).format(new Date());
+    const runtimeSystem = SYSTEM + `\n\nCURRENT DATE AND TIME IN ${BOOKING_TIME_ZONE}: ${nowContext}`;
     const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
-      body: JSON.stringify({ model: GROQ_MODEL, max_tokens: 280, temperature: 0.65, reasoning_effort: "low", messages: [{ role: "system", content: SYSTEM }, ...messages] }),
+      body: JSON.stringify({ model: GROQ_MODEL, max_tokens: 280, temperature: 0.65, reasoning_effort: "low", messages: [{ role: "system", content: runtimeSystem }, ...messages] }),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(JSON.stringify(d));
