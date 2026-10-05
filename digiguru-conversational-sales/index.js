@@ -206,7 +206,7 @@ const welcomed = new Set(); // first-message intro state (in memory)
 const seen = new Set();     // processed message ids (dedupe webhook retries)
 const recentInbound = new Map(); // phone -> { text, at } prevents duplicate webhook deliveries from double replying
 const processing = new Map(); // phone -> Promise serializes concurrent webhook events per prospect
-const MAX_TURNS = 20;
+const MAX_TURNS = 12;
 const DUPLICATE_WINDOW_MS = 8000;
 
 app.get("/health", (_req, res) => res.send("ok")); // point a free uptime pinger here
@@ -657,14 +657,40 @@ async function askClaude(messages) {
     // Default: Groq (free tier, OpenAI style API, runs Llama)
     const nowContext = new Intl.DateTimeFormat("en-GB", { timeZone: BOOKING_TIME_ZONE, dateStyle: "full", timeStyle: "short" }).format(new Date());
     const runtimeSystem = SYSTEM + `\n\nCURRENT DATE AND TIME IN ${BOOKING_TIME_ZONE}: ${nowContext}`;
-    const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
-      body: JSON.stringify({ model: GROQ_MODEL, max_tokens: 280, temperature: 0.65, reasoning_effort: "low", messages: [{ role: "system", content: runtimeSystem }, ...messages] }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(JSON.stringify(d));
-    return d.choices[0].message.content;
+    const payload = {
+      model: GROQ_MODEL,
+      max_tokens: 240,
+      temperature: 0.65,
+      reasoning_effort: "low",
+      messages: [{ role: "system", content: runtimeSystem }, ...messages.slice(-12)],
+    };
+
+    let r;
+    let d;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
+        body: JSON.stringify(payload),
+      });
+      d = await r.json();
+
+      if (r.ok) return d.choices[0].message.content;
+
+      // Groq's free/on-demand tier can briefly hit TPM limits. Wait for the
+      // server-provided retry window once rather than exposing an LLM error
+      // to the prospect.
+      if (r.status === 429 && attempt === 0) {
+        const retryAfter = Number(r.headers.get("retry-after") || 5);
+        const waitMs = Math.min(Math.max(retryAfter * 1000, 3500), 8000);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+
+      throw new Error(JSON.stringify(d));
+    }
+
+    throw new Error("Groq request failed");
   } catch (e) {
     console.error("llm error", e.message);
     return "Sorry, I had a small hiccup. Robin from DigiGuru will follow up with you shortly.";
