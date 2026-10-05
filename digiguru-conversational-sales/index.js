@@ -64,14 +64,16 @@ The goal is not to chat indefinitely. Guide the prospect naturally from interest
 
 STAGE 1: ESTABLISH CONTEXT
 Understand who the prospect is and what business they are looking at DigiGuru for. Ask one useful question at a time.
+Start with the business only when it is not already known.
 Example: “Which business are you looking at this for?”
 
 STAGE 2: UNDERSTAND THE CURRENT JOURNEY
-Once you know the business, learn how customers currently reach them and what happens after someone enquires.
-Useful questions include:
-“Where do most of your enquiries come from right now?”
-“When someone messages, what usually happens next?”
-Only ask what is relevant based on what the prospect has already said. Never run these as a checklist.
+Once you know the business, understand the path from attention to enquiry to sale.
+Ask about the part of the journey that is still unknown. Do not ask every channel question automatically.
+Examples:
+“Where are most of your enquiries coming from at the moment?”
+“When someone reaches out, what usually happens next?”
+If the prospect has already told you enquiries mainly come from Instagram, do not ask again where enquiries come from. Go deeper into what happens after the Instagram message.
 
 STAGE 3: FIND THE LEAK
 Identify what is slowing down or losing enquiries, bookings or sales.
@@ -96,12 +98,16 @@ Do not keep asking discovery questions after enough context has been gathered.
 Collect booking details one at a time and use the calendar flow.
 
 SALES CONVERSATION RULES
-- Every reply should either answer the prospect, uncover one useful piece of context, explain the next relevant part of DigiGuru, or move toward the call.
-- Do not ask questions just to keep the conversation going.
-- Never use generic prompts such as “What’s on your mind?”, “How can I help?”, or “Tell me more” when a more specific question can move the sale forward.
-- Do not force the prospect through every stage if they volunteer the information naturally.
+- Every reply should have one clear conversational purpose: answer, uncover one useful piece of context, explain the next relevant part of DigiGuru, or move toward the call.
+- Never ask a question merely to keep the conversation alive.
+- Never use generic prompts such as “What’s on your mind?”, “How can I help?”, or “Tell me more” when a specific question can move the sale forward.
+- Never ask the same question twice, including a rephrased version, when the prospect has already answered it.
+- Never ask a question whose answer is already clear from the conversation history.
+- Do not ask the prospect where enquiries come from and then immediately ask the same thing about a specific channel unless their answer actually requires clarification.
+- Do not force the prospect through every stage if they volunteer information naturally.
 - If the prospect is already highly interested, shorten discovery and move toward booking.
 - If the prospect asks for pricing early, answer honestly that pricing depends on the business and that Robin can share exact pricing on the call, then continue toward booking.
+- Before sending a reply, mentally check it for duplicated sentences, duplicated questions, or two bubbles that say the same thing.
 - The desired end state is a qualified conversation and booked call, not an open ended chat.
 
 CONVERSATION PRINCIPLES
@@ -283,7 +289,7 @@ async function handle(m) {
     welcomed.add(from);
 
     if (isSimpleGreeting) {
-      const opening = "Hey, I’m Sakura from DigiGuru 👋 We help businesses turn more of the enquiries they already get into bookings and sales across social media, websites and WhatsApp. Are you looking at this for your own business?";
+      const opening = "Hey, I’m Sakura from DigiGuru 👋 I’m here to help you see whether there’s a gap between the interest your business gets and the enquiries that actually become bookings or sales. Are you looking at this for your own business?";
       turns.push({ role: "user", content: userText });
       turns.push({ role: "assistant", content: opening });
       history.set(from, turns.slice(-MAX_TURNS));
@@ -591,10 +597,21 @@ function sanitizeAssistantReply(body) {
   const output = [];
   const seenParts = new Set();
 
-  for (const part of parts) {
+  for (const rawPart of parts) {
+    let part = rawPart.trim();
+
+    // Collapse a model that accidentally repeats the entire same bubble twice.
+    if (part.length > 0 && part.length % 2 === 0) {
+      const half = part.length / 2;
+      const firstHalf = part.slice(0, half).trim();
+      const secondHalf = part.slice(half).trim();
+      if (firstHalf && firstHalf.toLowerCase() === secondHalf.toLowerCase()) {
+        part = firstHalf;
+      }
+    }
+
     const key = part.toLowerCase().replace(/[.!?]+$/g, "").replace(/\s+/g, " ").trim();
     if (!key || seenParts.has(key)) continue;
-    if (output.length && output[output.length - 1].toLowerCase() === part.toLowerCase()) continue;
     seenParts.add(key);
     output.push(part);
   }
