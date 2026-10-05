@@ -14,6 +14,7 @@ const {
   BOOKING_TIME_ZONE = "Africa/Nairobi",
   BOOKING_DURATION_MINUTES = "20",
   MEETING_NAME = "DigiGuru Growth Conversation",
+  GOOGLE_REDIRECT_URI = "https://roby-s-salon-bot.onrender.com/google/oauth2callback",
 } = process.env;
 
 const BOOKING_DURATION = Number(BOOKING_DURATION_MINUTES);
@@ -130,6 +131,56 @@ const seen = new Set();     // processed message ids (dedupe webhook retries)
 const MAX_TURNS = 20;
 
 app.get("/health", (_req, res) => res.send("ok")); // point a free uptime pinger here
+\napp.get("/google/auth", (_req, res) => {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    return res.status(503).send("Google OAuth is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Render first.");
+  }
+
+  const auth = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
+  const state = crypto.createHmac("sha256", GOOGLE_CLIENT_SECRET).update("digiguru-google-oauth").digest("hex");
+
+  const authorizationUrl = auth.generateAuthUrl({
+    access_type: "offline",
+    prompt: "consent",
+    include_granted_scopes: true,
+    login_hint: "robinmigwi@gmail.com",
+    scope: [
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/calendar.events.freebusy",
+    ],
+    state,
+  });
+
+  res.redirect(authorizationUrl);
+});
+
+app.get("/google/oauth2callback", async (req, res) => {
+  try {
+    const expectedState = crypto.createHmac("sha256", GOOGLE_CLIENT_SECRET || "").update("digiguru-google-oauth").digest("hex");
+    if (!req.query.state || req.query.state !== expectedState) {
+      return res.status(400).send("Invalid Google OAuth state.");
+    }
+    if (!req.query.code) return res.status(400).send("Missing Google OAuth code.");
+
+    const auth = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
+    const { tokens } = await auth.getToken(req.query.code);
+
+    if (!tokens.refresh_token) {
+      return res.status(400).send("Google did not return a refresh token. Start again from /google/auth and approve access again.");
+    }
+
+    res.type("text/plain").send(
+      "Google authorization successful.\n\n" +
+      "Copy the refresh token below into Render as GOOGLE_REFRESH_TOKEN.\n\n" +
+      tokens.refresh_token +
+      "\n\nDo not paste this token into chat or GitHub."
+    );
+  } catch (error) {
+    console.error("google oauth error", error.message);
+    res.status(500).send("Google authorization failed. Check the Render logs for the reason.");
+  }
+});
+
 
 app.get("/webhook", (req, res) => {
   if (req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === VERIFY_TOKEN)
