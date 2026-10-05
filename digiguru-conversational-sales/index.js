@@ -677,6 +677,20 @@ async function askClaude(messages) {
 
       if (r.ok) return d.choices[0].message.content;
 
+      // GPT OSS can occasionally interpret the booking action marker as an
+      // assistant tool call even though this application does not expose an
+      // LLM tool. Groq then rejects the request with tool_use_failed, but the
+      // failed_generation still contains the booking marker we need. Recover
+      // that marker and let the application perform the real Calendar action.
+      if (d?.error?.code === "tool_use_failed") {
+        const failedGeneration = d?.error?.failed_generation || "";
+        const bookingStart = failedGeneration.indexOf("[[BOOKING:");
+        const bookingEnd = failedGeneration.indexOf("]]", bookingStart);
+        if (bookingStart >= 0 && bookingEnd > bookingStart) {
+          return failedGeneration.slice(bookingStart, bookingEnd + 2);
+        }
+      }
+
       // Groq's free/on-demand tier can briefly hit TPM limits. Wait for the
       // server-provided retry window once rather than exposing an LLM error
       // to the prospect.
