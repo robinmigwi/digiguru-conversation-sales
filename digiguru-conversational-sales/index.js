@@ -51,14 +51,13 @@ WHATSAPP FORMAT
 - Match the visitor’s language and energy. Use natural Kiswahili or Sheng when they do.
 
 FIRST MESSAGE
-- The visitor has already reached out to DigiGuru through a social channel, website, advertisement, referral or WhatsApp.
-- The application sends a separate Sakura introduction BEFORE your first AI reply.
-- That introduction is already visible to the visitor. NEVER introduce yourself again, say “I’m Sakura”, or repeat the DigiGuru description.
+- The visitor has reached DigiGuru through a social channel, website, advertisement, referral or WhatsApp.
+- The application controls the first contact message. Do not generate or repeat a generic introduction unless the visitor explicitly asks who you are.
 - Treat the visitor as an inbound prospect who has shown interest in DigiGuru.
-- Your first AI reply should move the conversation forward toward understanding what they need, not open with a generic “How can I help?” question.
-- When the visitor only says “Hi” or “Hello”, use a natural sales opening that assumes intent. Example: “Hey 👋 Are you looking at DigiGuru for your own business?” If the business is already known from the conversation, skip that question and move to the next relevant stage.
-- When the visitor asks about DigiGuru, answer their question directly, then continue the conversation toward the next stage.
-- Never send a second introduction under any circumstances.
+- When the visitor's first message is a simple greeting, the application will send a combined introduction and first sales question. Your AI reply is NOT used for that first greeting.
+- For a substantive first message, respond directly to what the prospect asked or said and move naturally toward the next sales stage.
+- Never start a substantive first reply with a generic “How can I help?” question.
+- Never send a second introduction after the application has already introduced Sakura.
 
 INBOUND SALES FLOW
 The goal is not to chat indefinitely. Guide the prospect naturally from interest to a useful business conversation and, when there is a fit, to a 20 minute call with Robin.
@@ -264,16 +263,22 @@ async function handle(m) {
   }
 
   const turns = history.get(from) || [];
+  const userText = m.text.body.trim();
+  const isSimpleGreeting = /^(hi|hello|hey|hallo|hiya|good morning|good afternoon|good evening)[.!?\s]*$/i.test(userText);
 
   if (!welcomed.has(from)) {
     welcomed.add(from);
-    const introduction = "Hey, I’m Sakura from DigiGuru 👋 We help businesses turn more of the enquiries they already get into bookings and sales, especially across social media, websites and WhatsApp. I’ll keep it simple.";
-    await send(from, introduction);
-    turns.push({ role: "assistant", content: introduction });
-    await new Promise((resolve) => setTimeout(resolve, 450));
+
+    if (isSimpleGreeting) {
+      const opening = "Hey, I’m Sakura from DigiGuru 👋 We help businesses turn more of the enquiries they already get into bookings and sales across social media, websites and WhatsApp. Are you looking at this for your own business?";
+      turns.push({ role: "user", content: userText });
+      turns.push({ role: "assistant", content: opening });
+      history.set(from, turns.slice(-MAX_TURNS));
+      return send(from, opening);
+    }
   }
 
-  turns.push({ role: "user", content: m.text.body });
+  turns.push({ role: "user", content: userText });
 
   const reply = await askClaude(turns);
   const bookingMatch = reply.match(/\[\[BOOKING:([\s\S]*?)\]\]/);
