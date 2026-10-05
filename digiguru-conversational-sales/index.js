@@ -177,7 +177,10 @@ app.use(express.json({ verify: (req, _res, buf) => { req.raw = buf; } }));
 const history = new Map();  // phone -> [{role, content}]  (in memory, resets on restart)
 const welcomed = new Set(); // first-message intro state (in memory)
 const seen = new Set();     // processed message ids (dedupe webhook retries)
+const recentInbound = new Map(); // phone -> { text, at } prevents duplicate webhook deliveries from double replying
+const processing = new Map(); // phone -> Promise serializes concurrent webhook events per prospect
 const MAX_TURNS = 20;
+const DUPLICATE_WINDOW_MS = 8000;
 
 app.get("/health", (_req, res) => res.send("ok")); // point a free uptime pinger here
 app.get("/google/auth", (_req, res) => {
@@ -257,14 +260,24 @@ async function handle(m) {
   if (seen.size > 2000) seen.clear();
 
   const from = m.from;
+  const previous = recentInbound.get(from);
+  const now = Date.now();
 
-  if (m.type !== "text") {
-    return send(from, "I can handle text here for now. Send me what you need help with and I’ll take it from there.");
+  if (m.type === "text") {
+    const userText = m.text.body.trim();
+    if (previous && previous.text === userText && now - previous.at < DUPLICATE_WINDOW_MS) return;
+    recentInbound.set(from, { text: userText, at: now });
   }
 
-  const turns = history.get(from) || [];
-  const userText = m.text.body.trim();
-  const isSimpleGreeting = /^(hi|hello|hey|hallo|hiya|good morning|good afternoon|good evening)[.!?\s]*$/i.test(userText);
+  const previousProcessing = processing.get(from) || Promise.resolve();
+  const currentProcessing = previousProcessing.then(async () => {
+    if (m.type !== "text") {
+      return send(from, "I can handle text here for now. Send me what you need help with and I’ll take it from there.");
+    }
+
+    const turns = history.get(from) || [];
+    const userText = m.text.body.trim();
+    const isSimpleGreeting = /^(hi|hello|hey|hallo|hiya|good morning|good afternoon|good evening)[.!?\s]*$/i.test(userText);
 
   if (!welcomed.has(from)) {
     welcomed.add(from);
@@ -280,7 +293,8 @@ async function handle(m) {
 
   turns.push({ role: "user", content: userText });
 
-  const reply = await askClaude(turns);
+  const rawReply = await askClaude(turns);
+  const reply = sanitizeAssistantReply(rawReply);
   const bookingMatch = reply.match(/\[\[BOOKING:([\s\S]*?)\]\]/);
   const notifyMatch = reply.match(/\[\[NOTIFY:([\s\S]*?)\]\]/);
   const clean = reply.replace(/\[\[(?:BOOKING|NOTIFY):[\s\S]*?\]\]/g, "").trim();
@@ -340,6 +354,12 @@ async function handle(m) {
 
   await sendReplyBubbles(from, clean);
   if (notifyMatch) await notifyOwner(from, notifyMatch[1].trim());
+  }).finally(() => {
+    if (processing.get(from) === currentProcessing) processing.delete(from);
+  });
+
+  processing.set(from, currentProcessing);
+  return currentProcessing;
 }
 
 function getGoogleCalendarClient() {
@@ -560,6 +580,26 @@ async function sendReplyBubbles(to, body) {
     if (i > 0) await new Promise((resolve) => setTimeout(resolve, 350));
     await send(to, bubbles[i]);
   }
+}
+
+function sanitizeAssistantReply(body) {
+  const parts = body
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const output = [];
+  const seenParts = new Set();
+
+  for (const part of parts) {
+    const key = part.toLowerCase().replace(/[.!?]+$/g, "").replace(/\s+/g, " ").trim();
+    if (!key || seenParts.has(key)) continue;
+    if (output.length && output[output.length - 1].toLowerCase() === part.toLowerCase()) continue;
+    seenParts.add(key);
+    output.push(part);
+  }
+
+  return output.join("\n\n").trim();
 }
 
 async function askClaude(messages) {
