@@ -263,13 +263,16 @@ async function handle(m) {
     return send(from, "I can handle text here for now. Send me what you need help with and I’ll take it from there.");
   }
 
+  const turns = history.get(from) || [];
+
   if (!welcomed.has(from)) {
     welcomed.add(from);
-    await send(from, "Hey, I’m Sakura from DigiGuru 👋 We help businesses turn more of the enquiries they already get into bookings and sales, especially across social media, websites and WhatsApp. I’ll keep it simple.");
+    const introduction = "Hey, I’m Sakura from DigiGuru 👋 We help businesses turn more of the enquiries they already get into bookings and sales, especially across social media, websites and WhatsApp. I’ll keep it simple.";
+    await send(from, introduction);
+    turns.push({ role: "assistant", content: introduction });
     await new Promise((resolve) => setTimeout(resolve, 450));
   }
 
-  const turns = history.get(from) || [];
   turns.push({ role: "user", content: m.text.body });
 
   const reply = await askClaude(turns);
