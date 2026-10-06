@@ -15,6 +15,7 @@ const pool = DATABASE_URL
 const memoryClients = new Map();
 const memoryConfigs = new Map();
 const memoryOnboarding = new Map();
+const memoryOnboardingTokens = new Map();
 const memoryWhatsapp = new Map();
 const memoryProducts = new Map();
 const memoryConversations = new Map();
@@ -722,6 +723,120 @@ async function getOnboarding(clientId) {
   return result?.rows?.[0] || null;
 }
 
+function hashOnboardingToken(token) {
+  return crypto.createHash("sha256").update(String(token), "utf8").digest("hex");
+}
+
+function onboardingPayload(row) {
+  if (!row) return null;
+  return {
+    clientId: row.client_id,
+    businessName: row.business_name,
+    industry: row.industry || "",
+    status: row.status || "",
+    contactName: row.contact_name || "",
+    contactEmail: row.contact_email || "",
+    submittedAt: row.submitted_at || null,
+    intake: row.intake_data || {},
+  };
+}
+
+async function createOnboardingLink(clientId) {
+  const client = await getClientById(clientId);
+  if (!client) throw new Error("Client not found.");
+  const token = crypto.randomBytes(32).toString("base64url");
+  const hash = hashOnboardingToken(token);
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+  if (!pool) {
+    seedMemoryClients();
+    const row = memoryOnboarding.get(clientId);
+    if (!row) throw new Error("Onboarding record not found.");
+    row.access_token_hash = hash;
+    row.access_token_created_at = createdAt.toISOString();
+    row.access_token_expires_at = expiresAt.toISOString();
+    memoryOnboardingTokens.set(hash, clientId);
+  } else {
+    await query("UPDATE onboarding SET access_token_hash = $1, access_token_created_at = $2, access_token_expires_at = $3, updated_at = NOW() WHERE client_id = $4", [hash, createdAt, expiresAt, clientId]);
+  }
+  return {
+    token,
+    expiresAt: expiresAt.toISOString(),
+    onboardingUrl: `/onboarding/${token}`,
+    client: {clientId: client.client_id, businessName: client.business_name, industry: client.industry || ""},
+  };
+}
+
+async function getPublicOnboarding(token) {
+  const hash = hashOnboardingToken(token);
+  let row = null;
+  if (!pool) {
+    seedMemoryClients();
+    const clientId = memoryOnboardingTokens.get(hash);
+    if (!clientId) return null;
+    const onboarding = memoryOnboarding.get(clientId);
+    const client = memoryClientRow(clientId);
+    if (!onboarding || !client) return null;
+    if (onboarding.access_token_expires_at && new Date(onboarding.access_token_expires_at) < new Date()) return null;
+    row = {...onboarding, client_id: client.client_id, business_name: client.business_name, industry: client.industry, status: client.status, intake_data: onboarding.intake_data || {}};
+  } else {
+    const result = await query("SELECT c.client_id, c.business_name, c.industry, c.status, o.contact_name, o.contact_email, o.intake_data, o.submitted_at, o.access_token_expires_at FROM onboarding o JOIN clients c ON c.client_id = o.client_id WHERE o.access_token_hash = $1", [hash]);
+    row = result?.rows?.[0] || null;
+    if (row?.access_token_expires_at && new Date(row.access_token_expires_at) < new Date()) row = null;
+  }
+  return onboardingPayload(row);
+}
+
+function buildOnboardingKnowledge(intake) {
+  const labels = {website:"Website", location:"Location / service area", discovery:"How customers find the business", currentJourney:"What happens after an enquiry", commonQuestions:"Common customer questions", friction:"Current friction or opportunity", desiredOutcome:"Desired outcome", productsServices:"Products or services", delivery:"Delivery / service rules", payment:"Payment rules", refunds:"Refund / cancellation rules", handoff:"Human handoff rules", channels:"Existing channels", integrations:"Existing tools / integrations", notes:"Additional notes"};
+  return Object.entries(labels).filter(([key]) => String(intake?.[key] || "").trim()).map(([key,label]) => `${label}: ${String(intake[key]).trim()}`).join("\n");
+}
+
+async function updatePublicOnboarding(token, payload = {}, submit = false) {
+  const hash = hashOnboardingToken(token);
+  const safe = payload && typeof payload === "object" ? payload : {};
+  const intake = safe.intake && typeof safe.intake === "object" ? safe.intake : {};
+  if (!pool) {
+    seedMemoryClients();
+    const clientId = memoryOnboardingTokens.get(hash);
+    if (!clientId) throw new Error("Onboarding link is invalid or expired.");
+    const onboarding = memoryOnboarding.get(clientId);
+    const client = memoryClients.get(clientId);
+    if (!onboarding || !client) throw new Error("Onboarding record not found.");
+    if (onboarding.access_token_expires_at && new Date(onboarding.access_token_expires_at) < new Date()) throw new Error("Onboarding link has expired.");
+    onboarding.contact_name = String(safe.contactName || "").trim();
+    onboarding.contact_email = String(safe.contactEmail || "").trim();
+    onboarding.intake_data = {...(onboarding.intake_data || {}), ...intake};
+    if (submit) onboarding.submitted_at = new Date().toISOString();
+    onboarding.data_status = Object.keys(onboarding.intake_data).length ? "COMPLETE" : "NOT_STARTED";
+    onboarding.discovery_status = onboarding.intake_data.discovery || onboarding.intake_data.currentJourney || onboarding.intake_data.friction ? "COMPLETE" : onboarding.discovery_status;
+    onboarding.conversation_status = onboarding.intake_data.tone || onboarding.intake_data.handoff ? "COMPLETE" : onboarding.conversation_status;
+    onboarding.integration_status = onboarding.intake_data.integrations ? "COMPLETE" : onboarding.integration_status;
+    if (submit) onboarding.approval_status = "PENDING_REVIEW";
+    const config = memoryConfigs.get(clientId) || {};
+    config.businessDescription = String(safe.businessDescription || config.businessDescription || "");
+    config.salesGoal = String(safe.salesGoal || config.salesGoal || "");
+    config.tone = String(safe.tone || config.tone || "warm, natural and professional");
+    config.language = String(safe.language || config.language || "English");
+    config.timezone = String(safe.timezone || config.timezone || "Africa/Nairobi");
+    config.ownerWhatsapp = String(safe.ownerWhatsapp || config.ownerWhatsapp || "");
+    config.knowledge = buildOnboardingKnowledge(onboarding.intake_data);
+    config.businessRules = {...(config.businessRules || {}), handoff: onboarding.intake_data.handoff || "", delivery: onboarding.intake_data.delivery || "", payment: onboarding.intake_data.payment || "", refunds: onboarding.intake_data.refunds || ""};
+    config.deliveryRules = {...(config.deliveryRules || {}), summary: onboarding.intake_data.delivery || ""};
+    config.paymentRules = {...(config.paymentRules || {}), summary: onboarding.intake_data.payment || ""};
+    memoryConfigs.set(clientId, config);
+    return onboardingPayload({...onboarding, client_id: client.clientId, business_name: client.businessName, industry: client.industry, status: client.status});
+  }
+  const currentResult = await query("SELECT c.client_id, c.business_name, c.industry, c.status, o.intake_data, o.access_token_expires_at FROM onboarding o JOIN clients c ON c.client_id = o.client_id WHERE o.access_token_hash = $1", [hash]);
+  const current = currentResult?.rows?.[0];
+  if (!current) throw new Error("Onboarding link is invalid or expired.");
+  if (current.access_token_expires_at && new Date(current.access_token_expires_at) < new Date()) throw new Error("Onboarding link has expired.");
+  const mergedIntake = {...(current.intake_data || {}), ...intake};
+  await query("UPDATE onboarding SET contact_name = COALESCE(NULLIF($1, ''), contact_name), contact_email = COALESCE(NULLIF($2, ''), contact_email), intake_data = $3::jsonb, discovery_status = CASE WHEN $4 THEN 'COMPLETE' ELSE discovery_status END, data_status = CASE WHEN $5 THEN 'COMPLETE' ELSE data_status END, conversation_status = CASE WHEN $6 THEN 'COMPLETE' ELSE conversation_status END, integration_status = CASE WHEN $7 THEN 'COMPLETE' ELSE integration_status END, submitted_at = CASE WHEN $8 THEN NOW() ELSE submitted_at END, approval_status = CASE WHEN $8 THEN 'PENDING_REVIEW' ELSE approval_status END, updated_at = NOW() WHERE client_id = $9", [String(safe.contactName || ""), String(safe.contactEmail || ""), JSON.stringify(mergedIntake), Boolean(mergedIntake.discovery || mergedIntake.currentJourney || mergedIntake.friction), Object.keys(mergedIntake).length > 0, Boolean(safe.tone || mergedIntake.handoff), Boolean(mergedIntake.integrations), submit, current.client_id]);
+  await query("UPDATE client_configurations SET business_description = COALESCE(NULLIF($1, ''), business_description), sales_goal = COALESCE(NULLIF($2, ''), sales_goal), tone = COALESCE(NULLIF($3, ''), tone), language = COALESCE(NULLIF($4, ''), language), timezone = COALESCE(NULLIF($5, ''), timezone), owner_whatsapp = COALESCE(NULLIF($6, ''), owner_whatsapp), knowledge = $7, business_rules = jsonb_build_object('delivery', NULLIF($8, ''), 'payment', NULLIF($9, ''), 'refunds', NULLIF($10, ''), 'handoff', NULLIF($11, '')), delivery_rules = jsonb_build_object('summary', NULLIF($8, '')), payment_rules = jsonb_build_object('summary', NULLIF($9, '')), updated_at = NOW() WHERE client_id = $12", [String(safe.businessDescription || ""), String(safe.salesGoal || ""), String(safe.tone || ""), String(safe.language || ""), String(safe.timezone || ""), String(safe.ownerWhatsapp || ""), buildOnboardingKnowledge(mergedIntake), String(mergedIntake.delivery || ""), String(mergedIntake.payment || ""), String(mergedIntake.refunds || ""), String(mergedIntake.handoff || ""), current.client_id]);
+  return getPublicOnboarding(token);
+}
+
 async function createProduct(clientId, product = {}) {
   if (!product.name) throw new Error("product.name is required.");
 
@@ -780,5 +895,8 @@ module.exports = {
   updateClientConfig,
   saveWhatsappConnection,
   getOnboarding,
+  createOnboardingLink,
+  getPublicOnboarding,
+  updatePublicOnboarding,
   createProduct,
 };
