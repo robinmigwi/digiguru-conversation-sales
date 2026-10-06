@@ -8,5 +8,10 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "googleapis": "^183.0.0",
+    "pg": "^8.16.3"
   }
 }
