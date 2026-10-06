@@ -101,6 +101,13 @@ CREATE TABLE IF NOT EXISTS onboarding (
   testing_status TEXT NOT NULL DEFAULT 'NOT_STARTED',
   approval_status TEXT NOT NULL DEFAULT 'NOT_STARTED',
   go_live_status TEXT NOT NULL DEFAULT 'NOT_STARTED',
+  access_token_hash TEXT,
+  access_token_created_at TIMESTAMPTZ,
+  access_token_expires_at TIMESTAMPTZ,
+  contact_name TEXT,
+  contact_email TEXT,
+  intake_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+  submitted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -117,3 +124,14 @@ CREATE TABLE IF NOT EXISTS webhook_events (
 
 CREATE INDEX IF NOT EXISTS idx_webhook_events_client_created
   ON webhook_events(client_id, created_at);
+
+ALTER TABLE onboarding ADD COLUMN IF NOT EXISTS access_token_hash TEXT;
+ALTER TABLE onboarding ADD COLUMN IF NOT EXISTS access_token_created_at TIMESTAMPTZ;
+ALTER TABLE onboarding ADD COLUMN IF NOT EXISTS access_token_expires_at TIMESTAMPTZ;
+ALTER TABLE onboarding ADD COLUMN IF NOT EXISTS contact_name TEXT;
+ALTER TABLE onboarding ADD COLUMN IF NOT EXISTS contact_email TEXT;
+ALTER TABLE onboarding ADD COLUMN IF NOT EXISTS intake_data JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE onboarding ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_onboarding_access_token_hash
+  ON onboarding(access_token_hash)
+  WHERE access_token_hash IS NOT NULL;
