@@ -550,8 +550,8 @@ async function createClient({
     );
 
     await dbClient.query(
-      `INSERT INTO onboarding (client_id, commercial_status)
-       VALUES ($1, 'COMPLETE')`,
+      `INSERT INTO onboarding (client_id)
+       VALUES ($1)`,
       [client]
     );
 
