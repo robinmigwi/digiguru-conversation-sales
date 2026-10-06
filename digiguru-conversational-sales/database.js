@@ -837,6 +837,42 @@ async function updatePublicOnboarding(token, payload = {}, submit = false) {
   return getPublicOnboarding(token);
 }
 
+async function updateOnboardingStatus(clientId, stage, status, internalNotes) {
+  const allowedStages = new Set([
+    "commercial_status","discovery_status","meta_status","whatsapp_status",
+    "data_status","conversation_status","integration_status","testing_status",
+    "approval_status","go_live_status"
+  ]);
+  const allowedStatuses = new Set([
+    "NOT_STARTED","IN_PROGRESS","BLOCKED","PENDING_REVIEW","COMPLETE"
+  ]);
+  if (!allowedStages.has(stage)) throw new Error("Invalid onboarding stage.");
+  if (!allowedStatuses.has(status)) throw new Error("Invalid onboarding status.");
+  if (!pool) {
+    seedMemoryClients();
+    const row = memoryOnboarding.get(clientId);
+    if (!row) throw new Error("Onboarding record not found.");
+    row[stage] = status;
+    if (internalNotes !== undefined) row.internal_notes = String(internalNotes || "");
+    row.updated_at = new Date().toISOString();
+    return row;
+  }
+  const fields = [stage + " = $1"];
+  const values = [status];
+  let index = 2;
+  if (internalNotes !== undefined) {
+    fields.push("internal_notes = $" + index);
+    values.push(String(internalNotes || ""));
+    index += 1;
+  }
+  values.push(clientId);
+  const result = await query(
+    "UPDATE onboarding SET " + fields.join(", ") + ", updated_at = NOW() WHERE client_id = $" + index + " RETURNING *",
+    values
+  );
+  if (!result?.rows?.[0]) throw new Error("Onboarding record not found.");
+  return result.rows[0];
+}
 async function createProduct(clientId, product = {}) {
   if (!product.name) throw new Error("product.name is required.");
 
@@ -898,5 +934,6 @@ module.exports = {
   createOnboardingLink,
   getPublicOnboarding,
   updatePublicOnboarding,
+  updateOnboardingStatus,
   createProduct,
 };
