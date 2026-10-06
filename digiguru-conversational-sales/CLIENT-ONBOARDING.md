@@ -279,6 +279,19 @@ The repository now contains:
 - Client-specific WhatsApp connection handling
 - The original DigiGuru/Sakura demo preserved as the fallback demo client
 
+## DigiGuru Control Center
+
+The first admin portal is intentionally small and internal. It is served from the same Render web service at `/admin/`.
+
+It currently provides:
+- Admin login
+- Client list
+- Onboarding progress
+- Client details
+- New client creation
+
+This is an operating console, not yet a customer-facing SaaS portal. Expand it only after the first real implementations prove the workflow.
+
 ## Internal API foundation
 
 Authenticated with the `x-digiguru-admin-token` header.
@@ -318,7 +331,7 @@ Keep LLM and platform secrets in Render environment variables or another secret 
 Provision Render Postgres and connect the service.
 
 ### Milestone B
-Create the first real client records for Noka Foods and Aish Accessories.
+Create the first real client records for Noka Foods and Eish Accessories.
 
 ### Milestone C
 Connect their WhatsApp numbers and validate webhook routing by phone number ID.
