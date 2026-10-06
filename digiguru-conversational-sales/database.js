@@ -205,6 +205,36 @@ async function initDatabase() {
      ON CONFLICT (client_id) DO NOTHING`
   );
 
+  const prospects = [
+    ['noka-foods', 'Noka Foods', 'Food / Ecommerce', 'Increase completed WhatsApp orders.', 'Prospective DigiGuru client.'],
+    ['eish-accessories', 'Eish Accessories', 'Services / Lead Generation', 'Respond faster and convert more enquiries.', 'Prospective DigiGuru client.'],
+    ['reila-kids-furniture', 'Reila Kids Furniture', 'Furniture / Ecommerce', 'Turn product page interest into WhatsApp conversations and orders.', 'Prospective DigiGuru client.'],
+  ];
+
+  for (const [clientId, businessName, industry, salesGoal, businessDescription] of prospects) {
+    await pool.query(
+      `INSERT INTO clients (client_id, business_name, industry, status, is_demo)
+       VALUES ($1, $2, $3, 'PROSPECT', FALSE)
+       ON CONFLICT (client_id) DO NOTHING`,
+      [clientId, businessName, industry]
+    );
+
+    await pool.query(
+      `INSERT INTO client_configurations
+        (client_id, business_description, sales_goal, timezone, capabilities)
+       VALUES ($1, $2, $3, 'Africa/Nairobi', '{}'::jsonb)
+       ON CONFLICT (client_id) DO NOTHING`,
+      [clientId, businessDescription, salesGoal]
+    );
+
+    await pool.query(
+      `INSERT INTO onboarding (client_id)
+       VALUES ($1)
+       ON CONFLICT (client_id) DO NOTHING`,
+      [clientId]
+    );
+  }
+
   console.log("DigiGuru multi-client database ready.");
   return true;
 }
