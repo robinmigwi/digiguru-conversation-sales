@@ -1,5 +1,6 @@
 // DigiGuru WhatsApp bot. Node 18+, Express, WhatsApp Cloud API, Anthropic API.
 const express = require("express");
+const path = require("path");
 const crypto = require("crypto");
 const KNOWLEDGE = require("./digiguru");
 const db = require("./database");
@@ -222,14 +223,62 @@ const DUPLICATE_WINDOW_MS = 8000;
 
 app.get("/health", (_req, res) => res.send("ok")); // point a free uptime pinger here
 
+function adminCookieSignature(expiresAt) {
+  return crypto.createHmac("sha256", process.env.DIGIGURU_ADMIN_TOKEN || "")
+    .update(`digiguru-admin:${expiresAt}`)
+    .digest("hex");
+}
+
+function isValidAdminCookie(req) {
+  const raw = req.headers.cookie || "";
+  const cookie = raw.split(";").map((part) => part.trim()).find((part) => part.startsWith("dg_admin_session="));
+  if (!cookie) return false;
+
+  const value = decodeURIComponent(cookie.slice("dg_admin_session=".length));
+  const [expiresAt, signature] = value.split(".");
+  if (!expiresAt || !signature || Number(expiresAt) < Date.now()) return false;
+
+  const expected = adminCookieSignature(expiresAt);
+  return signature.length === expected.length &&
+    crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+}
+
 function requireAdmin(req, res, next) {
   const expected = process.env.DIGIGURU_ADMIN_TOKEN;
   if (!expected) return res.status(503).json({ error: "DIGIGURU_ADMIN_TOKEN is not configured." });
-  if (req.get("x-digiguru-admin-token") !== expected) {
+
+  const headerAuthorized = req.get("x-digiguru-admin-token") === expected;
+  if (!headerAuthorized && !isValidAdminCookie(req)) {
     return res.status(401).json({ error: "Unauthorized." });
   }
+
   next();
 }
+
+app.use("/admin", express.static(path.join(__dirname, "admin")));
+
+app.post("/admin/login", (req, res) => {
+  const expected = process.env.DIGIGURU_ADMIN_TOKEN;
+  const token = String(req.body?.token || "");
+
+  if (!expected) return res.status(503).json({ error: "DIGIGURU_ADMIN_TOKEN is not configured." });
+  if (!token || token !== expected) return res.status(401).json({ error: "Invalid admin token." });
+
+  const expiresAt = Date.now() + 8 * 60 * 60 * 1000;
+  const value = `${expiresAt}.${adminCookieSignature(expiresAt)}`;
+
+  res.setHeader(
+    "Set-Cookie",
+    `dg_admin_session=${encodeURIComponent(value)}; Max-Age=28800; Path=/; HttpOnly; SameSite=Lax${process.env.RENDER === "true" ? "; Secure" : ""}`
+  );
+
+  res.json({ ok: true });
+});
+
+app.post("/admin/logout", (_req, res) => {
+  res.setHeader("Set-Cookie", "dg_admin_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax");
+  res.json({ ok: true });
+});
 
 app.get("/api/internal/clients", requireAdmin, async (_req, res) => {
   try {
@@ -247,6 +296,17 @@ app.post("/api/internal/clients", requireAdmin, async (req, res) => {
   } catch (error) {
     console.error("create client error", error.message);
     res.status(400).json({ error: error.message });
+  }
+});
+
+app.get("/api/internal/clients/:clientId", requireAdmin, async (req, res) => {
+  try {
+    const client = await db.getClientById(req.params.clientId);
+    if (!client) return res.status(404).json({ error: "Client not found." });
+    res.json(client);
+  } catch (error) {
+    console.error("get client error", error.message);
+    res.status(500).json({ error: "Unable to retrieve client." });
   }
 });
 
