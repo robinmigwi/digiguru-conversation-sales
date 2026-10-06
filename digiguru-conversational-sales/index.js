@@ -2,6 +2,8 @@
 const express = require("express");
 const crypto = require("crypto");
 const KNOWLEDGE = require("./digiguru");
+const db = require("./database");
+const { resolveClientContext, buildClientSystemPrompt } = require("./client-context");
 const { google } = require("googleapis");
 
 const {
@@ -210,15 +212,88 @@ RULES
 const app = express();
 app.use(express.json({ verify: (req, _res, buf) => { req.raw = buf; } }));
 
-const history = new Map();  // phone -> [{role, content}]  (in memory, resets on restart)
-const welcomed = new Set(); // first-message intro state (in memory)
-const seen = new Set();     // processed message ids (dedupe webhook retries)
-const recentInbound = new Map(); // phone -> { text, at } prevents duplicate webhook deliveries from double replying
-const processing = new Map(); // phone -> Promise serializes concurrent webhook events per prospect
+const history = new Map();  // fallback cache only when Postgres is not configured
+const welcomed = new Set(); // fallback first-message state
+const seen = new Set();     // fallback webhook dedupe when Postgres is not configured
+const recentInbound = new Map(); // client:phone -> { text, at }
+const processing = new Map(); // client:phone -> Promise serializes concurrent webhook events per prospect
 const MAX_TURNS = 12;
 const DUPLICATE_WINDOW_MS = 8000;
 
 app.get("/health", (_req, res) => res.send("ok")); // point a free uptime pinger here
+
+function requireAdmin(req, res, next) {
+  const expected = process.env.DIGIGURU_ADMIN_TOKEN;
+  if (!expected) return res.status(503).json({ error: "DIGIGURU_ADMIN_TOKEN is not configured." });
+  if (req.get("x-digiguru-admin-token") !== expected) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+  next();
+}
+
+app.get("/api/internal/clients", requireAdmin, async (_req, res) => {
+  try {
+    res.json(await db.listClients());
+  } catch (error) {
+    console.error("list clients error", error.message);
+    res.status(500).json({ error: "Unable to list clients." });
+  }
+});
+
+app.post("/api/internal/clients", requireAdmin, async (req, res) => {
+  try {
+    const client = await db.createClient(req.body || {});
+    res.status(201).json(client);
+  } catch (error) {
+    console.error("create client error", error.message);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.patch("/api/internal/clients/:clientId/config", requireAdmin, async (req, res) => {
+  try {
+    const client = await db.updateClientConfig(req.params.clientId, req.body || {});
+    res.json(client);
+  } catch (error) {
+    console.error("update client config error", error.message);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post("/api/internal/clients/:clientId/whatsapp", requireAdmin, async (req, res) => {
+  try {
+    const connection = await db.saveWhatsappConnection({
+      clientId: req.params.clientId,
+      ...req.body,
+    });
+    res.status(201).json(connection);
+  } catch (error) {
+    console.error("save whatsapp connection error", error.message);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.get("/api/internal/clients/:clientId/onboarding", requireAdmin, async (req, res) => {
+  try {
+    const onboarding = await db.getOnboarding(req.params.clientId);
+    if (!onboarding) return res.status(404).json({ error: "Client onboarding record not found." });
+    res.json(onboarding);
+  } catch (error) {
+    console.error("get onboarding error", error.message);
+    res.status(500).json({ error: "Unable to retrieve onboarding." });
+  }
+});
+
+app.post("/api/internal/clients/:clientId/products", requireAdmin, async (req, res) => {
+  try {
+    const product = await db.createProduct(req.params.clientId, req.body || {});
+    res.status(201).json(product);
+  } catch (error) {
+    console.error("create product error", error.message);
+    res.status(400).json({ error: error.message });
+  }
+});
+
 app.get("/google/auth", (_req, res) => {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
     return res.status(503).send("Google OAuth is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Render first.");
@@ -286,58 +361,103 @@ function validSignature(req) {
 app.post("/webhook", (req, res) => {
   if (!validSignature(req)) return res.sendStatus(401);
   res.sendStatus(200); // acknowledge fast, process after
-  const msgs = req.body?.entry?.[0]?.changes?.[0]?.value?.messages || [];
-  msgs.forEach((m) => handle(m).catch((e) => console.error("handle error", e.message)));
+
+  const value = req.body?.entry?.[0]?.changes?.[0]?.value || {};
+  const metadata = value.metadata || {};
+  const msgs = value.messages || [];
+
+  msgs.forEach((m) =>
+    handle(m, metadata).catch((e) => console.error("handle error", e.message))
+  );
 });
 
-async function handle(m) {
-  if (seen.has(m.id)) return;
-  seen.add(m.id);
-  if (seen.size > 2000) seen.clear();
+async function handle(m, metadata = {}) {
+  const phoneNumberId = metadata.phone_number_id;
+  const clientContext = await resolveClientContext(phoneNumberId);
 
+  if (!clientContext) {
+    console.error("No DigiGuru client is configured for WhatsApp phone_number_id:", phoneNumberId);
+    return;
+  }
+
+  const clientId = clientContext.clientId;
   const from = m.from;
-  const previous = recentInbound.get(from);
+  const key = `${clientId}:${from}`;
+
+  if (m.type !== "text") {
+    return sendReplyBubbles(
+      from,
+      "I can handle text here for now. Send me what you need help with and I’ll take it from there.",
+      clientContext.connection,
+      clientId
+    );
+  }
+
+  const userText = m.text.body.trim();
+  const previous = recentInbound.get(key);
   const now = Date.now();
 
-  if (m.type === "text") {
-    const userText = m.text.body.trim();
-    if (previous && previous.text === userText && now - previous.at < DUPLICATE_WINDOW_MS) return;
-    recentInbound.set(from, { text: userText, at: now });
-  }
+  if (previous && previous.text === userText && now - previous.at < DUPLICATE_WINDOW_MS) return;
+  recentInbound.set(key, { text: userText, at: now });
 
-  const previousProcessing = processing.get(from) || Promise.resolve();
+  const previousProcessing = processing.get(key) || Promise.resolve();
   const currentProcessing = previousProcessing.then(async () => {
-    if (m.type !== "text") {
-      return send(from, "I can handle text here for now. Send me what you need help with and I’ll take it from there.");
+    const databaseEnabled = db.dbEnabled();
+
+    // Decide whether the welcome has already been sent before claiming the webhook event.
+    const existingConversation = databaseEnabled
+      ? await db.getConversation(clientId, from)
+      : null;
+
+    const isFirstInbound = existingConversation
+      ? !existingConversation.welcomed
+      : !welcomed.has(key);
+
+    if (isFirstInbound) {
+      const welcome = clientContext.isDemo
+        ? "Hey, welcome to DigiGuru 👋 I’m Sakura. I’ll help you figure out where DigiGuru could make a difference in your business."
+        : `Hey, welcome to ${clientContext.businessName} 👋 I’m here to help with whatever you need.`;
+
+      await sendReplyBubbles(from, welcome, clientContext.connection, clientId);
+
+      if (databaseEnabled) {
+        await db.markConversationWelcomed(clientId, from);
+      } else {
+        welcomed.add(key);
+      }
     }
 
-    const turns = history.get(from) || [];
-    const userText = m.text.body.trim();
+    if (databaseEnabled) {
+      const claimed = await db.claimInboundMessage(clientId, from, m.id, userText);
+      if (!claimed) return;
+    } else {
+      if (seen.has(m.id)) return;
+      seen.add(m.id);
+      if (seen.size > 2000) seen.clear();
+    }
+
+    const conversation = databaseEnabled
+      ? await db.getConversation(clientId, from)
+      : null;
+
+    const turns = conversation?.history || history.get(key) || [];
     const isSimpleGreeting = /^(hi|hello|hey|hallo|hiya|good morning|good afternoon|good evening)[.!?\s]*$/i.test(userText);
 
-  const isFirstInbound = !welcomed.has(from);
-
-  if (isFirstInbound) {
-    welcomed.add(from);
-
-    const welcome = "Hey, welcome to DigiGuru 👋 I’m Sakura. I’ll help you figure out where DigiGuru could make a difference in your business.";
-    await send(from, welcome);
-
-    if (isSimpleGreeting) {
-      const opening = "What kind of business are you looking at this for?";
+    if (!databaseEnabled) {
       turns.push({ role: "user", content: userText });
-      turns.push({ role: "assistant", content: welcome });
-      turns.push({ role: "assistant", content: opening });
-      history.set(from, turns.slice(-MAX_TURNS));
-      return send(from, opening);
     }
 
-    turns.push({ role: "assistant", content: welcome });
-  }
+    if (isFirstInbound && isSimpleGreeting) {
+      const opening = clientContext.isDemo
+        ? "What kind of business are you looking at this for?"
+        : "What can I help you with today?";
 
-  turns.push({ role: "user", content: userText });
+      turns.push({ role: "assistant", content: opening });
+      history.set(key, turns.slice(-MAX_TURNS));
+      return sendReplyBubbles(from, opening, clientContext.connection, clientId);
+    }
 
-  const rawReply = await askClaude(turns);
+    const rawReply = await askClaude(turns, clientContext);
   const reply = sanitizeAssistantReply(rawReply);
   const bookingMatch = reply.match(/\[\[BOOKING:([\s\S]*?)\]\]/);
   const notifyMatch = reply.match(/\[\[NOTIFY:([\s\S]*?)\]\]/);
@@ -348,7 +468,7 @@ async function handle(m) {
 
     if (!booking) {
       turns.push({ role: "assistant", content: "I need one more detail before I can book that." });
-      history.set(from, turns.slice(-MAX_TURNS));
+      history.set(key, turns.slice(-MAX_TURNS));
       return send(from, "I need one more detail before I can book that. What email should I send the invite to?");
     }
 
@@ -381,13 +501,13 @@ async function handle(m) {
       }
       turns.push({ role: "assistant", content: response });
       history.set(from, turns.slice(-MAX_TURNS));
-      return sendReplyBubbles(from, response);
+      return sendReplyBubbles(from, response, clientContext.connection, clientId);
     }
 
     const fallback = "I’ve got your details, but the booking system hit a small issue on my side. I don’t want to give you a false confirmation. Robin will follow up and confirm the appointment.";
     turns.push({ role: "assistant", content: fallback });
     history.set(from, turns.slice(-MAX_TURNS));
-    await send(from, fallback);
+    await send(from, fallback, clientContext.connection);
     await notifyOwner(from, `BOOKING_ERROR | ${booking.name} | ${booking.business} | ${booking.email} | ${result.error || "unknown error"}`);
     return;
   }
@@ -396,8 +516,8 @@ async function handle(m) {
   turns.push({ role: "assistant", content: assistantContent });
   history.set(from, turns.slice(-MAX_TURNS));
 
-  await sendReplyBubbles(from, clean);
-  if (notifyMatch) await notifyOwner(from, notifyMatch[1].trim());
+  await sendReplyBubbles(from, clean, clientContext.connection, clientId);
+  if (notifyMatch) await notifyOwner(from, notifyMatch[1].trim(), clientContext);
   }).finally(() => {
     if (processing.get(from) === currentProcessing) processing.delete(from);
   });
@@ -613,19 +733,6 @@ async function createOrSuggestBooking(booking) {
   }
 }
 
-async function sendReplyBubbles(to, body) {
-  const bubbles = body
-    .split(/\n\s*\n/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .slice(0, 3);
-
-  for (let i = 0; i < bubbles.length; i++) {
-    if (i > 0) await new Promise((resolve) => setTimeout(resolve, 350));
-    await send(to, bubbles[i]);
-  }
-}
-
 function sanitizeAssistantReply(body) {
   const parts = body
     .split(/\n\s*\n/)
@@ -657,11 +764,14 @@ function sanitizeAssistantReply(body) {
   return output.join("\n\n").trim();
 }
 
-async function askClaude(messages) {
+async function askClaude(messages, clientContext) {
   try {
+    const clientSystem = clientContext?.isDemo ? SYSTEM : buildClientSystemPrompt(clientContext);
+    const clientTimeZone = clientContext?.timezone || BOOKING_TIME_ZONE;
+    const nowContext = new Intl.DateTimeFormat("en-GB", { timeZone: clientTimeZone, dateStyle: "full", timeStyle: "short" }).format(new Date());
+    const runtimeSystem = clientSystem + `\n\nCURRENT DATE AND TIME IN ${clientTimeZone}: ${nowContext}`;
+
     if (LLM_PROVIDER === "anthropic") {
-      const nowContext = new Intl.DateTimeFormat("en-GB", { timeZone: BOOKING_TIME_ZONE, dateStyle: "full", timeStyle: "short" }).format(new Date());
-      const runtimeSystem = SYSTEM + `\n\nCURRENT DATE AND TIME IN ${BOOKING_TIME_ZONE}: ${nowContext}`;
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
@@ -728,19 +838,58 @@ async function askClaude(messages) {
   }
 }
 
-async function send(to, body) {
-  const r = await fetch(`https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+async function send(to, body, connection = {}) {
+  const phoneNumberId = connection.phoneNumberId || WHATSAPP_PHONE_NUMBER_ID;
+  const accessToken = connection.accessToken || WHATSAPP_TOKEN;
+
+  if (!phoneNumberId || !accessToken) {
+    console.error("whatsapp send skipped: connection is not configured");
+    return false;
+  }
+
+  const r = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${WHATSAPP_TOKEN}` },
+    headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
     body: JSON.stringify({ messaging_product: "whatsapp", to, type: "text", text: { body } }),
   });
-  if (!r.ok) console.error("whatsapp send", r.status, await r.text());
+
+  if (!r.ok) {
+    console.error("whatsapp send", r.status, await r.text());
+    return false;
+  }
+
+  return true;
 }
 
-async function notifyOwner(from, info) {
-  const text = `DigiGuru bot alert\nFrom: +${from}\n${info}\n\nReply to them directly: https://wa.me/${from}`;
+async function sendReplyBubbles(to, body, connection, clientId) {
+  const bubbles = body
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+
+  for (let i = 0; i < bubbles.length; i++) {
+    if (i > 0) await new Promise((resolve) => setTimeout(resolve, 350));
+    const sent = await send(to, bubbles[i], connection);
+    if (sent && clientId && db.dbEnabled()) {
+      await db.recordOutboundMessage(clientId, to, bubbles[i]);
+    }
+  }
+}
+
+async function notifyOwner(from, info, clientContext) {
+  const owner = clientContext.ownerWhatsapp || OWNER_WHATSAPP;
+  const text = `${clientContext.businessName} conversation alert\nFrom: +${from}\n${info}\n\nReply to them directly: https://wa.me/${from}`;
   console.log(text); // always logged, so nothing is lost if WhatsApp refuses
-  if (OWNER_WHATSAPP) await send(OWNER_WHATSAPP, text);
+  if (owner) await send(owner, text, clientContext.connection);
 }
 
-app.listen(PORT, () => console.log("DigiGuru bot listening on", PORT));
+async function boot() {
+  if (db.dbEnabled()) await db.initDatabase();
+  app.listen(PORT, () => console.log("DigiGuru bot listening on", PORT));
+}
+
+boot().catch((error) => {
+  console.error("startup error", error.message);
+  process.exit(1);
+});
