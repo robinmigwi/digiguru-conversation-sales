@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DigiGuru Client Onboarding</title>
+  <style>
+    :root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17352c;background:#f4f7f3}
+    *{box-sizing:border-box} body{margin:0}.wrap{max-width:900px;margin:0 auto;padding:28px 18px 56px}
+    .brand{font-weight:800;letter-spacing:.08em;text-transform:uppercase;font-size:12px;color:#2d6f57}.hero{padding:28px 0 18px}
+    h1{font-size:34px;line-height:1.08;margin:8px 0 12px;max-width:720px}.intro{color:#64726b;font-size:16px;line-height:1.6;max-width:720px}
+    .card{background:#fff;border:1px solid #dce6df;border-radius:18px;padding:24px;box-shadow:0 8px 28px rgba(18,55,43,.06)}
+    .steps{display:flex;gap:8px;overflow:auto;margin-bottom:16px}.step{min-width:112px;padding:8px 12px;border-radius:999px;background:#edf2ee;color:#68746e;font-size:12px;font-weight:700;text-align:center}.step.active{background:#17352c;color:#fff}
+    .section{display:none}.section.active{display:block}.section h2{margin:0 0 7px;font-size:21px}.section .hint{margin:0 0 20px;color:#6b7772;line-height:1.5}
+    label{display:block;font-size:12px;font-weight:800;color:#53615b;margin:15px 0 6px}
+    input,textarea,select{width:100%;padding:12px 13px;border:1px solid #cad6ce;border-radius:10px;background:#fff;font:inherit;color:#17352c}
+    textarea{min-height:110px;resize:vertical}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}.three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+    .checks{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.check{padding:12px;border:1px solid #dbe5de;border-radius:10px}.check label{margin:0;font-size:13px;display:flex;gap:9px;align-items:center}.check input{width:auto}
+    .bar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 16px}.progress{height:7px;background:#e9efeb;border-radius:999px;overflow:hidden;flex:1}.progress span{display:block;height:100%;width:14%;background:#2f7d60}
+    .actions{display:flex;justify-content:space-between;gap:10px;margin-top:24px}.actions-right{margin-left:auto;display:flex;gap:10px}
+    button{border:0;border-radius:10px;padding:11px 16px;font:inherit;font-weight:800;cursor:pointer}.primary{background:#17352c;color:#fff}.secondary{background:#edf2ee;color:#17352c}
+    .save{font-size:12px;color:#68756f}.notice{padding:12px 14px;border-radius:10px;background:#f0f6f2;color:#4f6259;font-size:13px;line-height:1.5;margin-top:16px}
+    .success{text-align:center;padding:42px 18px}.success h2{font-size:28px;margin-bottom:10px}.success p{color:#65716c;line-height:1.6}
+    .error{color:#a33;font-size:13px;margin-top:10px}.summary{background:#f8faf8;border:1px solid #e5ebe7;border-radius:12px;padding:14px;line-height:1.7;color:#52605a}
+    @media(max-width:700px){.two,.three,.checks{grid-template-columns:1fr}h1{font-size:28px}.card{padding:18px}.step{min-width:96px}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">DigiGuru</div>
+  <div id="loading" class="card" style="margin-top:28px">Loading your onboarding workspace…</div>
+
+  <div id="app" class="hidden">
+    <div class="hero">
+      <div id="businessName" class="brand"></div>
+      <h1>Let's build your DigiGuru Concierge around how your business actually works.</h1>
+      <p class="intro">This workspace helps us capture the information we need to design the right customer journey. When you're with Robin or the team, you can complete it together. You can also save it and continue later.</p>
+    </div>
+
+    <div class="steps" id="steps"></div>
+    <div class="bar"><div class="progress"><span id="progress"></span></div><span class="save" id="saveState">Not saved yet</span></div>
+
+    <div class="card">
+      <section class="section active" data-step="0">
+        <h2>1. Business basics</h2>
+        <p class="hint">Tell us who you are, where you operate and who we should work with.</p>
+        <div class="two">
+          <div><label>Primary contact name</label><input id="contactName"></div>
+          <div><label>Primary contact email</label><input id="contactEmail" type="email"></div>
+        </div>
+        <div class="two">
+          <div><label>Website</label><input data-key="website" placeholder="https://"></div>
+          <div><label>Location or service area</label><input data-key="location" placeholder="Nairobi, Kenya"></div>
+        </div>
+        <label>What does the business do?</label><textarea id="businessDescription" placeholder="Describe the business in plain language."></textarea>
+        <label>What would you most like DigiGuru to improve?</label><textarea id="salesGoal" placeholder="For example: turn more WhatsApp enquiries into completed orders."></textarea>
+      </section>
+
+      <section class="section" data-step="1">
+        <h2>2. Customer journey</h2>
+        <p class="hint">We want to understand what happens between someone discovering you and becoming a customer.</p>
+        <label>How do customers usually discover the business?</label><textarea data-key="discovery" placeholder="Instagram, Facebook, Google, website, referrals, ads…"></textarea>
+        <label>What usually happens after someone sends an enquiry?</label><textarea data-key="currentJourney" placeholder="Walk us through the real process today."></textarea>
+        <label>What questions do customers ask most often?</label><textarea data-key="commonQuestions"></textarea>
+        <label>Where do enquiries currently slow down, get repeated or need staff attention?</label><textarea data-key="friction"></textarea>
+        <label>What would a better customer journey look like?</label><textarea data-key="desiredOutcome"></textarea>
+      </section>
+
+      <section class="section" data-step="2">
+        <h2>3. Products and services</h2>
+        <p class="hint">Give us the information your Concierge may need to answer questions or guide a purchase. We will structure it properly before go live.</p>
+        <label>Products or services, including prices where relevant</label>
+        <textarea data-key="productsServices" style="min-height:220px" placeholder="Example:
+Service: Deep Cleaning
+Price: KES 8,000
+What it includes: …
+
+Product: Kids Study Desk
+Price: KES 15,500
+Details: …"></textarea>
+        <div class="notice">Please do not add passwords, access tokens or private credentials here. We will handle technical access separately.</div>
+      </section>
+
+      <section class="section" data-step="3">
+        <h2>4. Business rules</h2>
+        <p class="hint">These rules help the Concierge give accurate answers instead of guessing.</p>
+        <label>Delivery, service area or fulfilment rules</label><textarea data-key="delivery"></textarea>
+        <label>Payment methods and payment rules</label><textarea data-key="payment"></textarea>
+        <label>Refund, cancellation or rescheduling rules</label><textarea data-key="refunds"></textarea>
+        <label>When should the Concierge hand a conversation to a human?</label><textarea data-key="handoff"></textarea>
+      </section>
+
+      <section class="section" data-step="4">
+        <h2>5. Concierge behaviour</h2>
+        <p class="hint">This shapes how the Concierge speaks and what it should be able to do.</p>
+        <div class="two">
+          <div><label>Preferred tone</label><input id="tone" placeholder="Warm, premium, direct, playful…"></div>
+          <div><label>Language</label><input id="language" value="English"></div>
+        </div>
+        <div class="two">
+          <div><label>Timezone</label><input id="timezone" value="Africa/Nairobi"></div>
+          <div><label>Business WhatsApp contact for handoff</label><input id="ownerWhatsapp" placeholder="+254..."></div>
+        </div>
+        <label>What should the Concierge be able to help customers do?</label>
+        <div class="checks">
+          <div class="check"><label><input type="checkbox" data-cap="faq"> Answer questions</label></div>
+          <div class="check"><label><input type="checkbox" data-cap="recommend"> Recommend products or services</label></div>
+          <div class="check"><label><input type="checkbox" data-cap="quote"> Qualify or collect quote requests</label></div>
+          <div class="check"><label><input type="checkbox" data-cap="order"> Take orders</label></div>
+          <div class="check"><label><input type="checkbox" data-cap="booking"> Arrange bookings</label></div>
+          <div class="check"><label><input type="checkbox" data-cap="followup"> Follow up</label></div>
+        </div>
+      </section>
+
+      <section class="section" data-step="5">
+        <h2>6. Channels and tools</h2>
+        <p class="hint">This tells us where customers and business data already live.</p>
+        <label>Existing channels</label><textarea data-key="channels" placeholder="WhatsApp, Instagram, Facebook, TikTok, LinkedIn, website, phone…"></textarea>
+        <label>Website, social pages or other useful links</label><textarea data-key="channelLinks"></textarea>
+        <label>Existing tools or integrations</label><textarea data-key="integrations" placeholder="Booking system, Google Calendar, CRM, ecommerce platform, payment system, POS…"></textarea>
+        <div class="notice">WhatsApp and Meta connection will be handled separately with the appropriate account owner or admin. Never send passwords through this form.</div>
+      </section>
+
+      <section class="section" data-step="6">
+        <h2>7. Review and submit</h2>
+        <p class="hint">Review the information with your team. Submitting this does not make anything live. It simply tells DigiGuru the discovery and onboarding information is ready for our internal configuration and review.</p>
+        <div id="summary" class="summary"></div>
+        <div class="notice">After submission, DigiGuru will review the information, structure the business knowledge, configure the Concierge and work with your team through testing and approval before go live.</div>
+      </section>
+
+      <div class="actions">
+        <button id="back" class="secondary" type="button">Back</button>
+        <div class="actions-right">
+          <button id="save" class="secondary" type="button">Save progress</button>
+          <button id="next" class="primary" type="button">Next</button>
+        </div>
+      </div>
+      <div id="error" class="error"></div>
+    </div>
+  </div>
+
+  <div id="success" class="card success hidden">
+    <div class="brand">DigiGuru</div>
+    <h2>Thanks. Your onboarding information is with us.</h2>
+    <p>We will review the details, structure the business knowledge and prepare the next steps with your team. This submission does not switch the Concierge live.</p>
+  </div>
+</div>
+
+<script>
+  const token = location.pathname.split("/").filter(Boolean).pop();
+  const loading = document.getElementById("loading");
+  const app = document.getElementById("app");
+  const success = document.getElementById("success");
+  const errorEl = document.getElementById("error");
+  const steps = [...document.querySelectorAll(".section")];
+  const labels = ["Business","Journey","Products","Rules","Behaviour","Channels","Review"];
+  let currentStep = 0;
+  let record = null;
+
+  document.getElementById("steps").innerHTML = labels.map((x,i)=>'<div class="step" data-step-pill="'+i+'">'+x+'</div>').join("");
+
+  function setValue(key,value){
+    const el=document.querySelector('[data-key="'+CSS.escape(key)+'"]');
+    if(el) el.value=value||"";
+  }
+
+  function collect(){
+    const intake={};
+    document.querySelectorAll("[data-key]").forEach(el=>intake[el.dataset.key]=el.value);
+    intake.tone=document.getElementById("tone").value;
+    intake.language=document.getElementById("language").value;
+    intake.timezone=document.getElementById("timezone").value;
+    intake.ownerWhatsapp=document.getElementById("ownerWhatsapp").value;
+    const capabilities={};
+    document.querySelectorAll("[data-cap]").forEach(el=>{capabilities[el.dataset.cap]=el.checked;});
+    return {
+      contactName:document.getElementById("contactName").value,
+      contactEmail:document.getElementById("contactEmail").value,
+      businessDescription:document.getElementById("businessDescription").value,
+      salesGoal:document.getElementById("salesGoal").value,
+      tone:intake.tone,
+      language:intake.language,
+      timezone:intake.timezone,
+      ownerWhatsapp:intake.ownerWhatsapp,
+      capabilities,
+      intake
+    };
+  }
+
+  function fill(data){
+    document.getElementById("contactName").value=data.contactName||"";
+    document.getElementById("contactEmail").value=data.contactEmail||"";
+    document.getElementById("businessDescription").value=data.intake?.businessDescription||data.businessDescription||"";
+    document.getElementById("salesGoal").value=data.intake?.salesGoal||data.salesGoal||"";
+    Object.entries(data.intake||{}).forEach(([k,v])=>setValue(k,v));
+    document.getElementById("tone").value=data.intake?.tone||data.tone||"Warm, natural and professional";
+    document.getElementById("language").value=data.intake?.language||data.language||"English";
+    document.getElementById("timezone").value=data.intake?.timezone||data.timezone||"Africa/Nairobi";
+    document.getElementById("ownerWhatsapp").value=data.intake?.ownerWhatsapp||data.ownerWhatsapp||"";
+    Object.entries(data.intake?.capabilities||{}).forEach(([k,v])=>{const el=document.querySelector('[data-cap="'+CSS.escape(k)+'"]');if(el)el.checked=Boolean(v);});
+  }
+
+  function summary(){
+    const d=collect();
+    const rows=[
+      ["Contact",d.contactName||"Not provided"],
+      ["Email",d.contactEmail||"Not provided"],
+      ["Business description",d.businessDescription||"Not provided"],
+      ["Primary goal",d.salesGoal||"Not provided"],
+      ["Customer journey",d.intake.currentJourney||"Not provided"],
+      ["Products/services",d.intake.productsServices||"Not provided"],
+      ["Business rules",d.intake.delivery||d.intake.payment||d.intake.refunds?"Provided":"Not provided"],
+      ["Channels",d.intake.channels||"Not provided"],
+      ["Integrations",d.intake.integrations||"Not provided"]
+    ];
+    document.getElementById("summary").innerHTML=rows.map(r=>"<div><strong>"+esc(r[0])+":</strong> "+esc(r[1])+"</div>").join("");
+  }
+
+  function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
+
+  function render(){
+    steps.forEach((el,i)=>el.classList.toggle("active",i===currentStep));
+    document.querySelectorAll("[data-step-pill]").forEach((el,i)=>el.classList.toggle("active",i===currentStep));
+    document.getElementById("back").style.visibility=currentStep===0?"hidden":"visible";
+    document.getElementById("next").textContent=currentStep===steps.length-1?"Submit onboarding":"Next";
+    document.getElementById("progress").style.width=((currentStep+1)/steps.length*100)+"%";
+    if(currentStep===steps.length-1) summary();
+    window.scrollTo({top:0,behavior:"smooth"});
+  }
+
+  async function api(method,url,body){
+    const res=await fetch(url,{method,headers:{"content-type":"application/json"},body:body?JSON.stringify(body):undefined});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error||"Something went wrong.");
+    return data;
+  }
+
+  async function save(submit=false){
+    errorEl.textContent="";
+    document.getElementById("saveState").textContent=submit?"Submitting…":"Saving…";
+    try{
+      const body=collect();
+      record=await api(submit?"POST":"PATCH",submit?"/api/onboarding/"+encodeURIComponent(token)+"/submit":"/api/onboarding/"+encodeURIComponent(token),body);
+      document.getElementById("saveState").textContent=submit?"Submitted":"Saved just now";
+      if(submit){app.classList.add("hidden");success.classList.remove("hidden");}
+    }catch(err){
+      errorEl.textContent=err.message;
+      document.getElementById("saveState").textContent="Not saved";
+      throw err;
+    }
+  }
+
+  document.getElementById("back").onclick=()=>{if(currentStep>0){currentStep--;render();}};
+  document.getElementById("save").onclick=()=>save(false);
+  document.getElementById("next").onclick=async()=>{
+    if(currentStep<steps.length-1){
+      await save(false);
+      currentStep++;render();
+    }else{
+      if(!document.getElementById("contactName").value.trim()||!document.getElementById("contactEmail").value.trim()){
+        errorEl.textContent="Please add a primary contact name and email before submitting.";
+        return;
+      }
+      try{await save(true);}catch{}
+    }
+  };
+
+  (async()=>{
+    try{
+      record=await api("GET","/api/onboarding/"+encodeURIComponent(token));
+      loading.classList.add("hidden");
+      app.classList.remove("hidden");
+      document.getElementById("businessName").textContent=record.businessName;
+      fill(record);
+      render();
+    }catch(err){
+      loading.textContent=err.message;
+      loading.classList.remove("card");
+    }
+  })();
+</script>
+</body>
+</html>
