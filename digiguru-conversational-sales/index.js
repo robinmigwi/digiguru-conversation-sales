@@ -535,7 +535,7 @@ async function handle(m, metadata = {}) {
     if (processing.get(key) === currentProcessing) processing.delete(key);
   });
 
-  processing.set(from, currentProcessing);
+  processing.set(key, currentProcessing);
   return currentProcessing;
 }
 
