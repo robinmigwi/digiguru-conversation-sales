@@ -403,6 +403,17 @@ app.get("/api/internal/clients/:clientId/onboarding", requireAdmin, async (req, 
   }
 });
 
+app.patch("/api/internal/clients/:clientId/onboarding", requireAdmin, async (req, res) => {
+  try {
+    const {stage, status, internalNotes} = req.body || {};
+    const onboarding = await db.updateOnboardingStatus(req.params.clientId, stage, status, internalNotes);
+    res.json(onboarding);
+  } catch (error) {
+    console.error("update onboarding status error", error.message);
+    res.status(400).json({error:error.message});
+  }
+});
+
 app.post("/api/internal/clients/:clientId/products", requireAdmin, async (req, res) => {
   try {
     const product = await db.createProduct(req.params.clientId, req.body || {});
