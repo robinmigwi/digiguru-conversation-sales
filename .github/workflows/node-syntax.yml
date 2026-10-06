@@ -1,0 +1,26 @@
+name: Node syntax check
+
+on:
+  push:
+    paths:
+      - "digiguru-conversational-sales/**"
+  pull_request:
+    paths:
+      - "digiguru-conversational-sales/**"
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: digiguru-conversational-sales
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: digiguru-conversational-sales/package.json
+      - run: npm install
+      - run: npm run check
