@@ -167,6 +167,8 @@ Details: …"></textarea>
   function collect(){
     const intake={};
     document.querySelectorAll("[data-key]").forEach(el=>intake[el.dataset.key]=el.value);
+    intake.businessDescription=document.getElementById("businessDescription").value;
+    intake.salesGoal=document.getElementById("salesGoal").value;
     intake.tone=document.getElementById("tone").value;
     intake.language=document.getElementById("language").value;
     intake.timezone=document.getElementById("timezone").value;
