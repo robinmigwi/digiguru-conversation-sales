@@ -183,7 +183,22 @@
       <div style="margin-top:16px">
         <div class="muted">Business description</div>
         <div style="margin-top:6px">${esc(client.business_description || "Not set")}</div>
-      </div>`;
+      </div>
+      <div style="margin-top:18px" id="onboardingLinkArea"><button class="primary" id="generateOnboarding">Generate client onboarding link</button><div id="onboardingLinkResult" class="hidden" style="margin-top:10px"></div></div>`;
+    const onboardingButton = document.getElementById("generateOnboarding");
+    const onboardingResult = document.getElementById("onboardingLinkResult");
+    onboardingButton.addEventListener("click", async () => {
+      onboardingResult.classList.remove("hidden");
+      onboardingResult.innerHTML = '<span class="muted">Generating secure link…</span>';
+      try {
+        const result = await api("/api/internal/clients/" + encodeURIComponent(id) + "/onboarding-link", {method:"POST"});
+        onboardingResult.innerHTML = `<div style="display:flex;gap:7px;flex-wrap:wrap"><input id="onboardingUrl" readonly value="${esc(result.onboardingUrl)}" style="flex:1;min-width:220px"><button class="secondary" id="copyOnboarding">Copy link</button><button class="secondary" id="openOnboarding">Open</button></div><div class="muted" style="font-size:12px;margin-top:6px">Link expires ${esc(new Date(result.expiresAt).toLocaleDateString())}.</div>`;
+        document.getElementById("copyOnboarding").onclick = async () => { await navigator.clipboard.writeText(result.onboardingUrl); document.getElementById("copyOnboarding").textContent = "Copied"; };
+        document.getElementById("openOnboarding").onclick = () => window.open(result.onboardingUrl, "_blank");
+      } catch (error) {
+        onboardingResult.innerHTML = '<span class="danger">' + esc(error.message) + '</span>';
+      }
+    });
   }
 
   async function start(){
