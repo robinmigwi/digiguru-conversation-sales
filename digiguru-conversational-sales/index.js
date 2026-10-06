@@ -211,6 +211,7 @@ RULES
 - ${KNOWLEDGE}`
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(express.json({ verify: (req, _res, buf) => { req.raw = buf; } }));
 
 const history = new Map();  // fallback cache only when Postgres is not configured
