@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DigiGuru Control Center</title>
+  <style>
+    :root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17352c;background:#f5f7f3}
+    *{box-sizing:border-box} body{margin:0} .wrap{max-width:1180px;margin:0 auto;padding:32px 20px 48px}
+    header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:28px}
+    h1{margin:0;font-size:28px}.sub{color:#66736e;margin-top:6px}
+    .card{background:#fff;border:1px solid #dde5df;border-radius:16px;padding:20px;box-shadow:0 4px 18px rgba(18,55,43,.05)}
+    .grid{display:grid;grid-template-columns:1.6fr 1fr;gap:18px}
+    .toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px}
+    button{border:0;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}
+    .primary{background:#17352c;color:#fff}.secondary{background:#edf2ee;color:#17352c}
+    table{width:100%;border-collapse:collapse} th,td{text-align:left;padding:13px 10px;border-bottom:1px solid #edf1ed;font-size:14px}
+    th{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#77817c}.row{cursor:pointer}.row:hover{background:#fafcf9}
+    .pill{display:inline-block;padding:5px 9px;border-radius:999px;background:#edf4ef;font-size:12px;font-weight:700;margin:3px 4px 3px 0}
+    .muted{color:#7d8782}.danger{color:#a33}.hidden{display:none!important}
+    label{display:block;font-size:12px;font-weight:700;color:#5c6963;margin:12px 0 6px}
+    input,textarea,select{width:100%;padding:10px 11px;border:1px solid #ced8d1;border-radius:9px;background:#fff;font:inherit}
+    textarea{min-height:88px;resize:vertical}
+    .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+    .progress{height:8px;background:#edf1ee;border-radius:999px;overflow:hidden}.progress span{display:block;height:100%;background:#2f7d60}
+    .stat{font-size:28px;font-weight:800}.section-title{margin:0 0 12px;font-size:17px}
+    .stack>*+*{margin-top:10px}
+    @media(max-width:850px){.grid{grid-template-columns:1fr}header{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div id="loginView" class="card" style="max-width:430px;margin:10vh auto">
+    <h1>DigiGuru Control Center</h1>
+    <p class="sub">Internal admin access</p>
+    <form id="loginForm">
+      <label>Admin token</label>
+      <input id="loginToken" type="password" autocomplete="current-password" required>
+      <div class="actions"><button class="primary">Sign in</button></div>
+      <p id="loginError" class="danger"></p>
+    </form>
+  </div>
+
+  <main id="appView" class="hidden">
+    <header>
+      <div>
+        <h1>DigiGuru Control Center</h1>
+        <div class="sub">Manage client onboarding and business configurations.</div>
+      </div>
+      <button id="logoutBtn" class="secondary">Sign out</button>
+    </header>
+
+    <div class="grid">
+      <section>
+        <div class="card">
+          <div class="toolbar">
+            <div>
+              <h2 class="section-title">Clients</h2>
+              <div class="muted">Each business runs on the same DigiGuru engine with its own configuration.</div>
+            </div>
+            <button id="newClientBtn" class="primary">+ New client</button>
+          </div>
+          <div id="clientTable"></div>
+        </div>
+      </section>
+
+      <aside class="stack">
+        <div class="card">
+          <h2 class="section-title">Selected client</h2>
+          <div id="details" class="muted">Select a client to inspect its configuration and onboarding progress.</div>
+        </div>
+
+        <div id="newClientCard" class="card hidden">
+          <h2 class="section-title">Create client</h2>
+          <form id="clientForm">
+            <label>Client ID</label>
+            <input name="clientId" placeholder="reila-kids-furniture" required>
+            <label>Business name</label>
+            <input name="businessName" placeholder="Reila Kids Furniture" required>
+            <label>Industry</label>
+            <input name="industry" placeholder="Furniture / Ecommerce">
+            <label>Primary goal</label>
+            <textarea name="salesGoal" placeholder="What should DigiGuru improve for this business?"></textarea>
+            <label>Business description</label>
+            <textarea name="businessDescription" placeholder="Short verified description of the business."></textarea>
+            <div class="actions">
+              <button type="button" id="cancelNew" class="secondary">Cancel</button>
+              <button class="primary">Create</button>
+            </div>
+            <p id="clientError" class="danger"></p>
+          </form>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+
+<script>
+  const loginView = document.getElementById("loginView");
+  const appView = document.getElementById("appView");
+  const loginError = document.getElementById("loginError");
+  const details = document.getElementById("details");
+  const table = document.getElementById("clientTable");
+  const newCard = document.getElementById("newClientCard");
+
+  async function api(url, options = {}) {
+    const res = await fetch(url, { credentials: "same-origin", ...options, headers: {
+      "content-type": "application/json",
+      ...(options.headers || {})
+    }});
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Request failed");
+    return data;
+  }
+
+  function stages(row){
+    return [
+      row.commercial_status, row.discovery_status, row.meta_status,
+      row.whatsapp_status, row.data_status, row.conversation_status,
+      row.integration_status, row.testing_status, row.approval_status,
+      row.go_live_status
+    ];
+  }
+
+  function progress(row){
+    const values = stages(row);
+    const done = values.filter(v => v === "COMPLETE").length;
+    return Math.round(done / values.length * 100);
+  }
+
+  function esc(s){
+    return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  async function loadClients(){
+    const clients = await api("/api/internal/clients");
+    if (!clients.length) {
+      table.innerHTML = '<p class="muted">No clients yet. Create the first one when a prospect becomes a client.</p>';
+      return;
+    }
+    table.innerHTML = `
+      <table>
+        <thead><tr><th>Business</th><th>Status</th><th>Onboarding</th></tr></thead>
+        <tbody>
+          ${clients.map(c => `
+            <tr class="row" data-id="${esc(c.client_id)}">
+              <td><strong>${esc(c.business_name)}</strong><br><span class="muted">${esc(c.industry || "")}</span></td>
+              <td><span class="pill">${esc(c.status)}</span></td>
+              <td>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div class="progress" style="flex:1"><span style="width:${progress(c)}%"></span></div>
+                  <span class="muted">${progress(c)}%</span>
+                </div>
+              </td>
+            </tr>`).join("")}
+        </tbody>
+      </table>`;
+    document.querySelectorAll(".row").forEach(row => row.addEventListener("click", () => loadClient(row.dataset.id)));
+  }
+
+  async function loadClient(id){
+    const client = await api("/api/internal/clients/" + encodeURIComponent(id));
+    const onboarding = await api("/api/internal/clients/" + encodeURIComponent(id) + "/onboarding");
+    const checks = [
+      ["Commercial", onboarding.commercial_status],
+      ["Discovery", onboarding.discovery_status],
+      ["Meta", onboarding.meta_status],
+      ["WhatsApp", onboarding.whatsapp_status],
+      ["Business data", onboarding.data_status],
+      ["Conversation", onboarding.conversation_status],
+      ["Integrations", onboarding.integration_status],
+      ["Testing", onboarding.testing_status],
+      ["Approval", onboarding.approval_status],
+      ["Go live", onboarding.go_live_status]
+    ];
+    details.innerHTML = `
+      <div><strong style="font-size:20px">${esc(client.business_name)}</strong></div>
+      <div class="muted" style="margin:4px 0 14px">${esc(client.industry || "Industry not set")} · ${esc(client.client_id)}</div>
+      <div class="pill">Goal: ${esc(client.sales_goal || "Not set")}</div>
+      <div style="margin-top:16px">
+        ${checks.map(([name,status]) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #edf1ed"><span>${name}</span><span class="pill">${status}</span></div>`).join("")}
+      </div>
+      <div style="margin-top:16px">
+        <div class="muted">Business description</div>
+        <div style="margin-top:6px">${esc(client.business_description || "Not set")}</div>
+      </div>`;
+  }
+
+  async function start(){
+    try {
+      await api("/api/internal/clients");
+      loginView.classList.add("hidden");
+      appView.classList.remove("hidden");
+      await loadClients();
+    } catch {
+      loginView.classList.remove("hidden");
+      appView.classList.add("hidden");
+    }
+  }
+
+  document.getElementById("loginForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    loginError.textContent = "";
+    try {
+      await fetch("/admin/login", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {"content-type":"application/json"},
+        body: JSON.stringify({token: document.getElementById("loginToken").value})
+      }).then(async r => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || "Sign in failed");
+      });
+      document.getElementById("loginToken").value = "";
+      await start();
+    } catch (err) {
+      loginError.textContent = err.message;
+    }
+  });
+
+  document.getElementById("logoutBtn").addEventListener("click", async () => {
+    await fetch("/admin/logout", {method:"POST", credentials:"same-origin"});
+    start();
+  });
+
+  document.getElementById("newClientBtn").addEventListener("click", () => newCard.classList.remove("hidden"));
+  document.getElementById("cancelNew").addEventListener("click", () => newCard.classList.add("hidden"));
+
+  document.getElementById("clientForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const form = new FormData(e.target);
+    const payload = Object.fromEntries(form.entries());
+    const err = document.getElementById("clientError");
+    err.textContent = "";
+    try {
+      await api("/api/internal/clients", {method:"POST", body:JSON.stringify(payload)});
+      e.target.reset();
+      newCard.classList.add("hidden");
+      await loadClients();
+    } catch (error) {
+      err.textContent = error.message;
+    }
+  });
+
+  start();
+</script>
+</body>
+</html>
