@@ -12,6 +12,126 @@ const pool = DATABASE_URL
     })
   : null;
 
+const memoryClients = new Map();
+const memoryConfigs = new Map();
+const memoryOnboarding = new Map();
+const memoryWhatsapp = new Map();
+const memoryProducts = new Map();
+const memoryConversations = new Map();
+const memoryMessages = new Map();
+const memoryMessageIds = new Set();
+
+function seedMemoryClients() {
+  if (memoryClients.size) return;
+
+  const seed = [
+    {
+      clientId: "digiguru-demo",
+      businessName: "DigiGuru",
+      industry: "Conversational Sales Systems",
+      status: "ACTIVE",
+      isDemo: true,
+      salesGoal: "Turn customer interest into qualified conversations and bookings.",
+      businessDescription: "DigiGuru builds customized conversational sales systems.",
+    },
+    {
+      clientId: "noka-foods",
+      businessName: "Noka Foods",
+      industry: "Food / Ecommerce",
+      status: "PROSPECT",
+      isDemo: false,
+      salesGoal: "Increase completed WhatsApp orders.",
+      businessDescription: "Prospective DigiGuru client.",
+    },
+    {
+      clientId: "eish-accessories",
+      businessName: "Eish Accessories",
+      industry: "Services / Lead Generation",
+      status: "PROSPECT",
+      isDemo: false,
+      salesGoal: "Respond faster and convert more enquiries.",
+      businessDescription: "Prospective DigiGuru client.",
+    },
+    {
+      clientId: "reila-kids-furniture",
+      businessName: "Reila Kids Furniture",
+      industry: "Furniture / Ecommerce",
+      status: "PROSPECT",
+      isDemo: false,
+      salesGoal: "Turn product page interest into WhatsApp conversations and orders.",
+      businessDescription: "Prospective DigiGuru client.",
+    },
+  ];
+
+  for (const client of seed) {
+    memoryClients.set(client.clientId, {
+      ...client,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    memoryConfigs.set(client.clientId, {
+      clientId: client.clientId,
+      businessDescription: client.businessDescription,
+      salesGoal: client.salesGoal,
+      systemInstructions: "",
+      knowledge: "",
+      tone: "warm, natural and professional",
+      language: "English",
+      timezone: "Africa/Nairobi",
+      ownerWhatsapp: process.env.OWNER_WHATSAPP || "",
+      capabilities: client.clientId === "digiguru-demo" ? { booking: true } : {},
+      businessRules: {},
+      deliveryRules: {},
+      paymentRules: {},
+    });
+
+    const empty = "NOT_STARTED";
+    memoryOnboarding.set(client.clientId, {
+      client_id: client.clientId,
+      commercial_status: client.clientId === "digiguru-demo" ? "COMPLETE" : empty,
+      discovery_status: empty,
+      meta_status: empty,
+      whatsapp_status: empty,
+      data_status: empty,
+      conversation_status: empty,
+      integration_status: empty,
+      testing_status: empty,
+      approval_status: empty,
+      go_live_status: client.clientId === "digiguru-demo" ? "COMPLETE" : empty,
+    });
+  }
+}
+
+function memoryClientRow(clientId) {
+  const client = memoryClients.get(clientId);
+  if (!client) return null;
+  const cfg = memoryConfigs.get(clientId) || {};
+  const onboarding = memoryOnboarding.get(clientId) || {};
+  return {
+    client_id: client.clientId,
+    business_name: client.businessName,
+    industry: client.industry,
+    status: client.status,
+    is_demo: client.isDemo,
+    created_at: client.createdAt,
+    updated_at: client.updatedAt,
+    business_description: cfg.businessDescription || "",
+    sales_goal: cfg.salesGoal || "",
+    system_instructions: cfg.systemInstructions || "",
+    knowledge: cfg.knowledge || "",
+    tone: cfg.tone || "",
+    language: cfg.language || "",
+    timezone: cfg.timezone || "Africa/Nairobi",
+    owner_whatsapp: cfg.ownerWhatsapp || "",
+    capabilities: cfg.capabilities || {},
+    business_rules: cfg.businessRules || {},
+    delivery_rules: cfg.deliveryRules || {},
+    payment_rules: cfg.paymentRules || {},
+    ...onboarding,
+  };
+}
+
 function dbEnabled() {
   return Boolean(pool);
 }
@@ -65,7 +185,8 @@ async function query(sql, params = []) {
 
 async function initDatabase() {
   if (!pool) {
-    console.log("DATABASE_URL not configured. DigiGuru will use in-memory fallback state.");
+    seedMemoryClients();
+    console.log("DATABASE_URL not configured. DigiGuru staging is using in-memory fallback state.");
     return false;
   }
 
@@ -89,6 +210,11 @@ async function initDatabase() {
 }
 
 async function listClients() {
+  if (!pool) {
+    seedMemoryClients();
+    return [...memoryClients.keys()].map(memoryClientRow).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  }
+
   const result = await query(
     `SELECT c.client_id, c.business_name, c.industry, c.status, c.is_demo,
             c.created_at, c.updated_at,
@@ -104,6 +230,11 @@ async function listClients() {
 }
 
 async function getClientById(clientId) {
+  if (!pool) {
+    seedMemoryClients();
+    return memoryClientRow(clientId);
+  }
+
   const result = await query(
     `SELECT c.client_id, c.business_name, c.industry, c.status, c.is_demo,
             cfg.business_description, cfg.sales_goal, cfg.system_instructions,
@@ -120,6 +251,23 @@ async function getClientById(clientId) {
 
 async function getClientByPhoneNumberId(phoneNumberId) {
   if (!phoneNumberId) return null;
+
+  if (!pool) {
+    seedMemoryClients();
+    for (const [clientId, connection] of memoryWhatsapp.entries()) {
+      if (connection.phone_number_id === phoneNumberId && connection.status === "ACTIVE") {
+        return {
+          ...memoryClientRow(clientId),
+          waba_id: connection.waba_id || "",
+          phone_number_id: connection.phone_number_id,
+          display_phone_number: connection.display_phone_number || "",
+          verified_name: connection.verified_name || "",
+          access_token: connection.access_token || "",
+        };
+      }
+    }
+    return null;
+  }
 
   const result = await query(
     `SELECT c.client_id, c.business_name, c.industry, c.status,
@@ -149,6 +297,22 @@ async function getClientByPhoneNumberId(phoneNumberId) {
 }
 
 async function ensureConversation(clientId, customerPhone) {
+  if (!pool) {
+    seedMemoryClients();
+    const key = `${clientId}:${customerPhone}`;
+    if (!memoryConversations.has(key)) {
+      memoryConversations.set(key, {
+        id: key,
+        client_id: clientId,
+        customer_phone: customerPhone,
+        stage: "NEW",
+        welcomed: false,
+      });
+      memoryMessages.set(key, []);
+    }
+    return memoryConversations.get(key);
+  }
+
   const result = await query(
     `INSERT INTO conversations (client_id, customer_phone, last_message_at)
      VALUES ($1, $2, NOW())
@@ -164,6 +328,14 @@ async function ensureConversation(clientId, customerPhone) {
 async function getConversation(clientId, customerPhone, historyLimit = 12) {
   const conversation = await ensureConversation(clientId, customerPhone);
   if (!conversation) return null;
+
+  if (!pool) {
+    const history = (memoryMessages.get(conversation.id) || [])
+      .slice(-historyLimit)
+      .map((row) => ({ role: row.role, content: row.content }));
+
+    return { ...conversation, history };
+  }
 
   const result = await query(
     `SELECT role, content, created_at
@@ -185,6 +357,15 @@ async function claimInboundMessage(clientId, customerPhone, waMessageId, content
   const conversation = await ensureConversation(clientId, customerPhone);
   if (!conversation) return true;
 
+  if (!pool) {
+    if (waMessageId && memoryMessageIds.has(waMessageId)) return false;
+    if (waMessageId) memoryMessageIds.add(waMessageId);
+    const rows = memoryMessages.get(conversation.id) || [];
+    rows.push({ role: "user", content, created_at: new Date().toISOString() });
+    memoryMessages.set(conversation.id, rows);
+    return true;
+  }
+
   const result = await query(
     `INSERT INTO messages
        (client_id, conversation_id, direction, role, content, wa_message_id)
@@ -201,6 +382,13 @@ async function recordOutboundMessage(clientId, customerPhone, content) {
   const conversation = await ensureConversation(clientId, customerPhone);
   if (!conversation) return;
 
+  if (!pool) {
+    const rows = memoryMessages.get(conversation.id) || [];
+    rows.push({ role: "assistant", content, created_at: new Date().toISOString() });
+    memoryMessages.set(conversation.id, rows);
+    return;
+  }
+
   await query(
     `INSERT INTO messages
        (client_id, conversation_id, direction, role, content)
@@ -210,6 +398,12 @@ async function recordOutboundMessage(clientId, customerPhone, content) {
 }
 
 async function markConversationWelcomed(clientId, customerPhone) {
+  if (!pool) {
+    const conversation = await ensureConversation(clientId, customerPhone);
+    conversation.welcomed = true;
+    return;
+  }
+
   await query(
     `UPDATE conversations
         SET welcomed = TRUE, updated_at = NOW(), last_message_at = NOW()
@@ -235,8 +429,6 @@ async function createClient({
   deliveryRules = {},
   paymentRules = {},
 }) {
-  if (!dbEnabled()) throw new Error("DATABASE_URL is required.");
-
   const client = String(clientId || "").trim();
   const name = String(businessName || "").trim();
 
@@ -244,6 +436,54 @@ async function createClient({
     throw new Error("clientId must be 3 to 50 characters using letters, numbers, underscores or hyphens.");
   }
   if (!name) throw new Error("businessName is required.");
+
+  if (!pool) {
+    seedMemoryClients();
+    if (memoryClients.has(client)) throw new Error("A client with this ID already exists.");
+
+    const now = new Date().toISOString();
+    memoryClients.set(client, {
+      clientId: client,
+      businessName: name,
+      industry: industry || "",
+      status: "PROSPECT",
+      isDemo: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    memoryConfigs.set(client, {
+      clientId: client,
+      businessDescription,
+      salesGoal,
+      systemInstructions,
+      knowledge,
+      tone,
+      language,
+      timezone,
+      ownerWhatsapp,
+      capabilities: capabilities || {},
+      businessRules: businessRules || {},
+      deliveryRules: deliveryRules || {},
+      paymentRules: paymentRules || {},
+    });
+
+    memoryOnboarding.set(client, {
+      client_id: client,
+      commercial_status: "NOT_STARTED",
+      discovery_status: "NOT_STARTED",
+      meta_status: "NOT_STARTED",
+      whatsapp_status: "NOT_STARTED",
+      data_status: "NOT_STARTED",
+      conversation_status: "NOT_STARTED",
+      integration_status: "NOT_STARTED",
+      testing_status: "NOT_STARTED",
+      approval_status: "NOT_STARTED",
+      go_live_status: "NOT_STARTED",
+    });
+
+    return memoryClientRow(client);
+  }
 
   const dbClient = await pool.connect();
   try {
@@ -295,10 +535,33 @@ async function createClient({
 }
 
 async function updateClientConfig(clientId, patch = {}) {
-  if (!dbEnabled()) throw new Error("DATABASE_URL is required.");
-
   const current = await getClientById(clientId);
   if (!current) throw new Error("Client not found.");
+
+  if (!pool) {
+    const config = memoryConfigs.get(clientId);
+    if (!config) throw new Error("Client not found.");
+
+    const mapping = {
+      businessDescription: "businessDescription",
+      salesGoal: "salesGoal",
+      systemInstructions: "systemInstructions",
+      knowledge: "knowledge",
+      tone: "tone",
+      language: "language",
+      timezone: "timezone",
+      ownerWhatsapp: "ownerWhatsapp",
+      capabilities: "capabilities",
+      businessRules: "businessRules",
+      deliveryRules: "deliveryRules",
+      paymentRules: "paymentRules",
+    };
+
+    for (const [key, value] of Object.entries(patch)) {
+      if (mapping[key]) config[mapping[key]] = value;
+    }
+    return memoryClientRow(clientId);
+  }
 
   const fields = {
     businessDescription: "business_description",
@@ -355,8 +618,35 @@ async function saveWhatsappConnection({
   verifiedName = "",
   accessToken,
 }) {
-  if (!dbEnabled()) throw new Error("DATABASE_URL is required.");
   if (!phoneNumberId || !accessToken) throw new Error("phoneNumberId and accessToken are required.");
+
+  if (!pool) {
+    seedMemoryClients();
+    if (!memoryClients.has(clientId)) throw new Error("Client not found.");
+    const row = {
+      client_id: clientId,
+      waba_id: wabaId,
+      phone_number_id: phoneNumberId,
+      display_phone_number: displayPhoneNumber,
+      verified_name: verifiedName,
+      access_token,
+      status: "ACTIVE",
+    };
+    memoryWhatsapp.set(clientId, row);
+    const onboarding = memoryOnboarding.get(clientId);
+    if (onboarding) {
+      onboarding.meta_status = "COMPLETE";
+      onboarding.whatsapp_status = "COMPLETE";
+    }
+    return {
+      client_id: clientId,
+      waba_id: wabaId,
+      phone_number_id: phoneNumberId,
+      display_phone_number: displayPhoneNumber,
+      verified_name: verifiedName,
+      status: "ACTIVE",
+    };
+  }
 
   const encrypted = encryptSecret(accessToken);
 
@@ -390,6 +680,11 @@ async function saveWhatsappConnection({
 }
 
 async function getOnboarding(clientId) {
+  if (!pool) {
+    seedMemoryClients();
+    return memoryOnboarding.get(clientId) || null;
+  }
+
   const result = await query(
     `SELECT * FROM onboarding WHERE client_id = $1`,
     [clientId]
@@ -398,8 +693,27 @@ async function getOnboarding(clientId) {
 }
 
 async function createProduct(clientId, product = {}) {
-  if (!dbEnabled()) throw new Error("DATABASE_URL is required.");
   if (!product.name) throw new Error("product.name is required.");
+
+  if (!pool) {
+    seedMemoryClients();
+    if (!memoryClients.has(clientId)) throw new Error("Client not found.");
+    const key = `${clientId}:${Date.now()}:${Math.random().toString(36).slice(2,8)}`;
+    const row = {
+      id: key,
+      client_id: clientId,
+      sku: product.sku || null,
+      name: product.name,
+      description: product.description || null,
+      price: product.price ?? null,
+      currency: product.currency || "KES",
+      stock: product.stock ?? null,
+      status: product.status || "ACTIVE",
+      metadata: product.metadata || {},
+    };
+    memoryProducts.set(key, row);
+    return row;
+  }
 
   const result = await query(
     `INSERT INTO products
