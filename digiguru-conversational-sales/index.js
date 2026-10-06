@@ -469,7 +469,12 @@ async function handle(m, metadata = {}) {
     if (!booking) {
       turns.push({ role: "assistant", content: "I need one more detail before I can book that." });
       history.set(key, turns.slice(-MAX_TURNS));
-      return send(from, "I need one more detail before I can book that. What email should I send the invite to?");
+      return sendReplyBubbles(
+        from,
+        "I need one more detail before I can book that. What email should I send the invite to?",
+        clientContext.connection,
+        clientId
+      );
     }
 
     const result = await createOrSuggestBooking(booking);
@@ -483,9 +488,13 @@ async function handle(m, metadata = {}) {
 
       const confirmation = `${first}\n\n${second}\n\nSee you then 👋`;
       turns.push({ role: "assistant", content: confirmation });
-      history.set(from, turns.slice(-MAX_TURNS));
-      await sendReplyBubbles(from, confirmation);
-      await notifyOwner(from, `BOOKING | ${booking.name} | ${booking.business} | ${dateText} | ${booking.email} | ${result.meetLink || result.eventLink}`);
+      history.set(key, turns.slice(-MAX_TURNS));
+      await sendReplyBubbles(from, confirmation, clientContext.connection, clientId);
+      await notifyOwner(
+        from,
+        `BOOKING | ${booking.name} | ${booking.business} | ${dateText} | ${booking.email} | ${result.meetLink || result.eventLink}`,
+        clientContext
+      );
       return;
     }
 
@@ -500,26 +509,30 @@ async function handle(m, metadata = {}) {
         response = "That time’s already taken. Give me another day or time and I’ll check it.";
       }
       turns.push({ role: "assistant", content: response });
-      history.set(from, turns.slice(-MAX_TURNS));
+      history.set(key, turns.slice(-MAX_TURNS));
       return sendReplyBubbles(from, response, clientContext.connection, clientId);
     }
 
     const fallback = "I’ve got your details, but the booking system hit a small issue on my side. I don’t want to give you a false confirmation. Robin will follow up and confirm the appointment.";
     turns.push({ role: "assistant", content: fallback });
-    history.set(from, turns.slice(-MAX_TURNS));
-    await send(from, fallback, clientContext.connection);
-    await notifyOwner(from, `BOOKING_ERROR | ${booking.name} | ${booking.business} | ${booking.email} | ${result.error || "unknown error"}`);
+    history.set(key, turns.slice(-MAX_TURNS));
+    await sendReplyBubbles(from, fallback, clientContext.connection, clientId);
+    await notifyOwner(
+      from,
+      `BOOKING_ERROR | ${booking.name} | ${booking.business} | ${booking.email} | ${result.error || "unknown error"}`,
+      clientContext
+    );
     return;
   }
 
   const assistantContent = clean || reply;
   turns.push({ role: "assistant", content: assistantContent });
-  history.set(from, turns.slice(-MAX_TURNS));
+  history.set(key, turns.slice(-MAX_TURNS));
 
   await sendReplyBubbles(from, clean, clientContext.connection, clientId);
   if (notifyMatch) await notifyOwner(from, notifyMatch[1].trim(), clientContext);
   }).finally(() => {
-    if (processing.get(from) === currentProcessing) processing.delete(from);
+    if (processing.get(key) === currentProcessing) processing.delete(key);
   });
 
   processing.set(from, currentProcessing);
@@ -782,8 +795,6 @@ async function askClaude(messages, clientContext) {
       return d.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
     }
     // Default: Groq (free tier, OpenAI style API, runs Llama)
-    const nowContext = new Intl.DateTimeFormat("en-GB", { timeZone: BOOKING_TIME_ZONE, dateStyle: "full", timeStyle: "short" }).format(new Date());
-    const runtimeSystem = SYSTEM + `\n\nCURRENT DATE AND TIME IN ${BOOKING_TIME_ZONE}: ${nowContext}`;
     const payload = {
       model: GROQ_MODEL,
       max_tokens: 240,
