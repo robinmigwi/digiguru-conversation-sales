@@ -1,0 +1,12 @@
+{
+  "name": "digiguru-conversation-sales-staging",
+  "private": true,
+  "scripts": {
+    "build": "cd digiguru-conversational-sales && npm install",
+    "start": "cd digiguru-conversational-sales && npm start",
+    "check": "cd digiguru-conversational-sales && npm run check"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
