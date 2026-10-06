@@ -444,6 +444,12 @@ async function handle(m, metadata = {}) {
     const isSimpleGreeting = /^(hi|hello|hey|hallo|hiya|good morning|good afternoon|good evening)[.!?\s]*$/i.test(userText);
 
     if (!databaseEnabled) {
+      if (isFirstInbound) {
+        const welcome = clientContext.isDemo
+          ? "Hey, welcome to DigiGuru 👋 I’m Sakura. I’ll help you figure out where DigiGuru could make a difference in your business."
+          : `Hey, welcome to ${clientContext.businessName} 👋 I’m here to help with whatever you need.`;
+        turns.push({ role: "assistant", content: welcome });
+      }
       turns.push({ role: "user", content: userText });
     }
 
