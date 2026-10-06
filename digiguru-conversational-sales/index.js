@@ -221,7 +221,54 @@ const processing = new Map(); // client:phone -> Promise serializes concurrent w
 const MAX_TURNS = 12;
 const DUPLICATE_WINDOW_MS = 8000;
 
+app.get("/", (_req, res) => {
+  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DigiGuru Engine</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f7f3;color:#17352c;font-family:Inter,system-ui,sans-serif}.box{max-width:620px;padding:48px;text-align:center}a{display:inline-block;margin:8px;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700;background:#17352c;color:#fff}.muted{color:#68756f}</style></head><body><div class="box"><div style="font-size:13px;letter-spacing:.12em;text-transform:uppercase">DigiGuru Engine</div><h1>Conversational sales infrastructure</h1><p class="muted">Staging environment. Internal controls and private client onboarding are available through their dedicated links.</p><a href="/admin/">Control Center</a><a href="/health">Health</a></div></body></html>`);
+});
+
 app.get("/health", (_req, res) => res.send("ok")); // point a free uptime pinger here
+
+app.get("/onboarding/:token", async (req, res) => {
+  try {
+    const record = await db.getPublicOnboarding(req.params.token);
+    if (!record) return res.status(404).send("This onboarding link is invalid or has expired.");
+    res.sendFile(path.join(__dirname, "onboarding", "index.html"));
+  } catch (error) {
+    console.error("public onboarding page error", error.message);
+    res.status(500).send("Unable to open onboarding.");
+  }
+});
+
+app.get("/api/onboarding/:token", async (req, res) => {
+  try {
+    const record = await db.getPublicOnboarding(req.params.token);
+    if (!record) return res.status(404).json({error:"This onboarding link is invalid or has expired."});
+    res.json(record);
+  } catch (error) {
+    console.error("public onboarding get error", error.message);
+    res.status(500).json({error:"Unable to load onboarding."});
+  }
+});
+
+app.patch("/api/onboarding/:token", async (req, res) => {
+  try {
+    const record = await db.updatePublicOnboarding(req.params.token, req.body || {}, false);
+    res.json(record);
+  } catch (error) {
+    console.error("public onboarding save error", error.message);
+    res.status(400).json({error:error.message});
+  }
+});
+
+app.post("/api/onboarding/:token/submit", async (req, res) => {
+  try {
+    const record = await db.updatePublicOnboarding(req.params.token, req.body || {}, true);
+    res.json(record);
+  } catch (error) {
+    console.error("public onboarding submit error", error.message);
+    res.status(400).json({error:error.message});
+  }
+});
+
 
 function adminCookieSignature(expiresAt) {
   return crypto.createHmac("sha256", process.env.DIGIGURU_ADMIN_TOKEN || "")
@@ -278,6 +325,17 @@ app.post("/admin/login", (req, res) => {
 app.post("/admin/logout", (_req, res) => {
   res.setHeader("Set-Cookie", "dg_admin_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax");
   res.json({ ok: true });
+});
+
+app.post("/api/internal/clients/:clientId/onboarding-link", requireAdmin, async (req, res) => {
+  try {
+    const result = await db.createOnboardingLink(req.params.clientId);
+    const baseUrl = process.env.PUBLIC_APP_URL || `${req.protocol}://${req.get("host")}`;
+    res.status(201).json({...result, onboardingUrl: `${baseUrl}${result.onboardingUrl}`});
+  } catch (error) {
+    console.error("create onboarding link error", error.message);
+    res.status(400).json({error:error.message});
+  }
 });
 
 app.get("/api/internal/clients", requireAdmin, async (_req, res) => {
