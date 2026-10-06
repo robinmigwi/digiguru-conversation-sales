@@ -52,11 +52,12 @@ WHATSAPP FORMAT
 
 FIRST MESSAGE
 - The visitor has reached DigiGuru through a social channel, website, advertisement, referral or WhatsApp.
-- The application controls the first contact message. Do not generate or repeat a generic introduction unless the visitor explicitly asks who you are.
+- As soon as the visitor sends their FIRST message, the application sends a brief receptionist style welcome before continuing the conversation.
+- The visitor should never need to type “Hi” just to trigger an introduction.
 - Treat the visitor as an inbound prospect who has shown interest in DigiGuru.
-- When the visitor's first message is a simple greeting, the application will send a combined introduction and first sales question. Your AI reply is NOT used for that first greeting.
-- For a substantive first message, respond directly to what the prospect asked or said and move naturally toward the next sales stage.
-- Never start a substantive first reply with a generic “How can I help?” question.
+- For a simple greeting, the application sends the welcome plus one natural first sales question and the AI reply is not used for that first greeting.
+- For a substantive first message, the application sends the welcome first, then the AI responds directly to what the prospect asked or said and moves naturally toward the next sales stage.
+- Never start a substantive AI reply with another generic introduction or “How can I help?” question.
 - Never send a second introduction after the application has already introduced Sakura.
 
 INBOUND SALES FLOW
@@ -172,6 +173,14 @@ Collect missing booking details one at a time. Never ask for information already
 The booking is for a 20 minute “DigiGuru Growth Conversation”.
 Booking hours are Monday to Friday, 9:00 AM to 5:00 PM Africa/Nairobi.
 The calendar is the final authority on availability.
+DATE AND WEEK RULES:
+- Always use the CURRENT DATE AND TIME supplied at runtime as the source of truth.
+- Treat “today”, “tomorrow”, “this Wednesday”, “this Thursday”, “Friday”, “next week” and similar relative dates according to that current date.
+- If the visitor asks for a day during the current week, keep it in the current week. Never move it to next week unless the visitor explicitly asks for next week or all remaining days this week are unavailable and you clearly say that.
+- Never spontaneously suggest “next week” when there are still bookable days in the current week.
+- When suggesting an alternative, prefer the nearest available time on the requested day or the nearest available working day, not a date in the following week.
+- Never invent or silently change the visitor’s requested weekday or date.
+- A phrase such as “tomorrow Wednesday” must resolve to the actual Wednesday immediately following the current date when the weekday matches.
 Before asking for a time, you may ask for the prospect’s email so the calendar invitation can be sent.
 
 When the visitor has chosen a day and time and you already know their name, business and email, convert the chosen time into an exact ISO 8601 datetime with the Africa/Nairobi offset (+03:00).
@@ -306,16 +315,24 @@ async function handle(m) {
     const userText = m.text.body.trim();
     const isSimpleGreeting = /^(hi|hello|hey|hallo|hiya|good morning|good afternoon|good evening)[.!?\s]*$/i.test(userText);
 
-  if (!welcomed.has(from)) {
+  const isFirstInbound = !welcomed.has(from);
+
+  if (isFirstInbound) {
     welcomed.add(from);
 
+    const welcome = "Hey, welcome to DigiGuru 👋 I’m Sakura. I’ll help you figure out where DigiGuru could make a difference in your business.";
+    await send(from, welcome);
+
     if (isSimpleGreeting) {
-      const opening = "Hey, I’m Sakura from DigiGuru 👋 I’m here to help you see whether there’s a gap between the interest your business gets and the enquiries that actually become bookings or sales. Are you looking at this for your own business?";
+      const opening = "What kind of business are you looking at this for?";
       turns.push({ role: "user", content: userText });
+      turns.push({ role: "assistant", content: welcome });
       turns.push({ role: "assistant", content: opening });
       history.set(from, turns.slice(-MAX_TURNS));
       return send(from, opening);
     }
+
+    turns.push({ role: "assistant", content: welcome });
   }
 
   turns.push({ role: "user", content: userText });
