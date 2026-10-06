@@ -135,3 +135,5 @@ ALTER TABLE onboarding ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_onboarding_access_token_hash
   ON onboarding(access_token_hash)
   WHERE access_token_hash IS NOT NULL;
+
+ALTER TABLE onboarding ADD COLUMN IF NOT EXISTS internal_notes TEXT NOT NULL DEFAULT '';
