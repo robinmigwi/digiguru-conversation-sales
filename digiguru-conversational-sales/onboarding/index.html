@@ -165,7 +165,7 @@ async function api(method,url,body){
 function save(submit){
  if(isSubmitted)return Promise.resolve();
  clearTimeout(saveTimer);
- saveChain=saveChain.then(async function(){
+ saveChain=saveChain.catch(function(){}).then(async function(){
   errorEl.textContent="";
   document.getElementById("saveStatus").textContent=submit?"Submitting…":"Saving to DigiGuru…";
   var body=collect();
