@@ -108,6 +108,14 @@ async function loadClient(id){
  const client=await api("/api/internal/clients/"+encodeURIComponent(id));
  const onb=await api("/api/internal/clients/"+encodeURIComponent(id)+"/onboarding");
  const capabilityNames=Object.entries(client.capabilities||{}).filter(([,v])=>Boolean(v)).map(([k])=>k).join(", ")||"None selected";
+ const intakeData=onb.intake_data&&typeof onb.intake_data==="object"?onb.intake_data:{};
+ const responseEntries=Object.entries(intakeData).filter(([k,v])=>k!=="capabilities"&&!k.startsWith("cap")&&k!=="contactName"&&k!=="contactEmail"&&((typeof v==="boolean"&&v)||(typeof v==="string"&&v.trim())||(Array.isArray(v)&&v.length)));
+ const responseRows=responseEntries.map(([key,value])=>{
+   const label=key.replace(/([A-Z])/g," $1").replace(/^./,c=>c.toUpperCase());
+   const shown=Array.isArray(value)?value.join(", "):typeof value==="boolean"?(value?"Yes":"No"):String(value);
+   return '<div class="config-item" style="white-space:pre-wrap"><strong>'+esc(label)+'</strong>'+esc(shown)+'</div>';
+ }).join("");
+ const responsePanel='<details style="margin-top:18px;border:1px solid #dce6df;border-radius:12px;padding:13px 15px;background:#fbfcfb"><summary style="cursor:pointer;font-weight:800;color:#17352c">Client onboarding responses ('+responseEntries.length+')</summary><div class="config-grid" style="margin-top:12px">'+(responseRows||'<div class="muted small">No client responses have been saved yet.</div>')+'</div></details>';
  details.innerHTML=
  '<div class="toolbar"><div><div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#2d6f57">Client workspace</div><h2 class="section-title" style="font-size:24px;margin-top:4px">'+esc(client.business_name)+'</h2><div class="muted small">'+esc(client.industry||"Industry not set")+' · '+esc(client.client_id)+'</div></div><span class="pill">'+esc(client.status)+'</span></div>'+
  '<div class="links" style="margin-bottom:14px"><button id="generateLink" class="primary">Generate onboarding link</button><button id="openOnboarding" class="secondary">Open existing link</button></div>'+
@@ -118,6 +126,7 @@ async function loadClient(id){
  '<div class="config-item"><strong>Capabilities</strong>'+esc(capabilityNames)+'</div>'+
  '<div class="config-item"><strong>Client submission</strong>'+esc(onb.submitted_at?new Date(onb.submitted_at).toLocaleString():"Not submitted")+'</div>'+
  '</div>'+
+ responsePanel+
  '<div style="margin-top:18px"><h3 class="section-title">Implementation checklist</h3><div class="muted small" style="margin:5px 0 8px">Update these as the project moves from discovery to go live.</div>'+
  stages.map(([key,label])=>'<div class="stage"><div class="stage-name">'+esc(label)+'</div><select data-stage="'+key+'">'+statusOptions.map(s=>'<option value="'+s+'" '+(onb[key]===s?"selected":"")+'>'+statusLabel(s)+'</option>').join("")+'</select><div class="stage-dot">'+(onb[key]==="COMPLETE"?"✓":"")+'</div></div>').join("")+
  '</div>'+
