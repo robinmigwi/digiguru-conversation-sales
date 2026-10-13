@@ -788,8 +788,26 @@ async function getPublicOnboarding(token) {
 }
 
 function buildOnboardingKnowledge(intake) {
-  const labels = {website:"Website", location:"Location / service area", discovery:"How customers find the business", currentJourney:"What happens after an enquiry", commonQuestions:"Common customer questions", friction:"Current friction or opportunity", desiredOutcome:"Desired outcome", productsServices:"Products or services", delivery:"Delivery / service rules", payment:"Payment rules", refunds:"Refund / cancellation rules", handoff:"Human handoff rules", channels:"Existing channels", integrations:"Existing tools / integrations", notes:"Additional notes"};
-  return Object.entries(labels).filter(([key]) => String(intake?.[key] || "").trim()).map(([key,label]) => `${label}: ${String(intake[key]).trim()}`).join("\n");
+  const labels = {
+    businessWebsite: "Website / online shop", location: "Location / service area", openingHours: "Opening hours",
+    businessDescription: "Business description", salesGoal: "Business priority", customerGroups: "Priority customer groups",
+    bestSellers: "Best sellers / priority offers", discovery: "How customers find the business",
+    currentJourney: "What happens after an enquiry", commonQuestions: "Common customer questions",
+    friction: "Current friction or opportunity", desiredOutcome: "Desired customer journey",
+    responseOwner: "Who handles enquiries", followUpProcess: "Follow-up process", afterHoursProcess: "After-hours process",
+    productsServices: "Products or services and approved details", productCatalogueUrl: "Catalogue / price list",
+    productVariants: "Product or service variants", priceRules: "Pricing and quotation rules",
+    stockAvailability: "Availability and capacity rules", preparationLeadTime: "Lead times / minimum notice",
+    customOrders: "Custom requests", promotions: "Current offers and restrictions",
+    delivery: "Delivery / service rules", payment: "Payment rules", refunds: "Refund / cancellation rules",
+    orderConfirmation: "Order / booking confirmation rules", handoff: "Human handover rules",
+    channels: "Customer channels", channelLinks: "Channel links", integrations: "Existing tools / integrations",
+    tone: "Brand tone", language: "Preferred language", timezone: "Business timezone", brandVoice: "Brand voice / approved claims"
+  };
+  return Object.entries(labels)
+    .filter(([key]) => typeof intake?.[key] === "string" && intake[key].trim())
+    .map(([key, label]) => `${label}: ${intake[key].trim()}`)
+    .join("\n");
 }
 
 async function updatePublicOnboarding(token, payload = {}, submit = false) {
