@@ -94,7 +94,7 @@ var navLinks=Array.prototype.slice.call(document.querySelectorAll("[data-nav]"))
 var labels=["Business basics and goals","Current customer journey","Products, services and pricing","Fulfilment, business rules and Concierge behaviour","Channels, tools and access","Marketing and campaign priorities","Measurement and reporting","Decisions, approvals and next actions"];
 var currentStep=0,record=null,saveTimer=null,saveChain=Promise.resolve(),isSubmitted=false;
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];});}
-function humanize(k){return k.replace(/([A-Z])/g," $1").replace(/^./function(c){return c.toUpperCase();});}
+function humanize(k){return k.replace(/([A-Z])/g," $1").replace(/^./,function(c){return c.toUpperCase();});}
 function collect(){
  var intake={};
  allFields.forEach(function(el){
